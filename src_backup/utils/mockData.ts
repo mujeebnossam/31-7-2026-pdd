@@ -1,0 +1,113 @@
+import { Transaction, Budget, CategoryItem } from '../types';
+
+export const INITIAL_CATEGORIES: CategoryItem[] = [
+  { id: 'salary', name: 'Salary', iconName: 'Briefcase', color: '#10B981', bgColor: 'rgba(16, 185, 129, 0.1)' },
+  { id: 'food', name: 'Food & Dining', iconName: 'Utensils', color: '#F87171', bgColor: 'rgba(248, 113, 113, 0.1)' },
+  { id: 'shopping', name: 'Shopping', iconName: 'ShoppingBag', color: '#EC4899', bgColor: 'rgba(236, 72, 153, 0.1)' },
+  { id: 'transport', name: 'Transport', iconName: 'Car', color: '#60A5FA', bgColor: 'rgba(96, 165, 250, 0.1)' },
+  { id: 'housing', name: 'Housing & Rent', iconName: 'Home', color: '#F59E0B', bgColor: 'rgba(245, 158, 11, 0.1)' },
+  { id: 'leisure', name: 'Leisure & Health', iconName: 'Activity', color: '#A78BFA', bgColor: 'rgba(167, 139, 250, 0.1)' },
+  { id: 'utilities', name: 'Utilities', iconName: 'Zap', color: '#2DD4BF', bgColor: 'rgba(45, 212, 191, 0.1)' },
+  { id: 'investment', name: 'Investments', iconName: 'TrendingUp', color: '#34D399', bgColor: 'rgba(52, 211, 153, 0.1)' },
+];
+
+export const INITIAL_TRANSACTIONS: Transaction[] = [
+  {
+    id: 't1',
+    title: 'Monthly Paycheck',
+    amount: 4800.00,
+    type: 'income',
+    category: 'Salary',
+    date: '2026-06-01',
+    notes: 'Base salary payments',
+  },
+  {
+    id: 't2',
+    title: 'Whole Foods Grocery',
+    amount: 142.50,
+    type: 'expense',
+    category: 'Food & Dining',
+    date: '2026-06-08',
+    notes: 'Weekly organic groceries',
+  },
+  {
+    id: 't3',
+    title: 'Nike Tech Fleece',
+    amount: 120.00,
+    type: 'expense',
+    category: 'Shopping',
+    date: '2026-06-09',
+    notes: 'Autumn wardrobe addition',
+  },
+  {
+    id: 't4',
+    title: 'Chevron Fuel',
+    amount: 45.00,
+    type: 'expense',
+    category: 'Transport',
+    date: '2026-06-10',
+    notes: 'Full tank refuel',
+  },
+  {
+    id: 't5',
+    title: 'Apartment Rental',
+    amount: 1200.00,
+    type: 'expense',
+    category: 'Housing & Rent',
+    date: '2026-06-02',
+    notes: 'Monthly apartment payment',
+  },
+  {
+    id: 't6',
+    title: 'Gold\'s Gym Subscription',
+    amount: 55.00,
+    type: 'expense',
+    category: 'Leisure & Health',
+    date: '2026-06-05',
+    notes: 'Monthly gym premium membership',
+  },
+  {
+    id: 't7',
+    title: 'Netflix & Spotify Bundle',
+    amount: 29.98,
+    type: 'expense',
+    category: 'Leisure & Health',
+    date: '2026-06-06',
+    notes: 'Monthly streaming subscriptions',
+  },
+  {
+    id: 't8',
+    title: 'Electric & Gas Utility',
+    amount: 88.40,
+    type: 'expense',
+    category: 'Utilities',
+    date: '2026-06-07',
+    notes: 'State grid invoice',
+  },
+  {
+    id: 't9',
+    title: 'Uber Eats Comfort Food',
+    amount: 38.60,
+    type: 'expense',
+    category: 'Food & Dining',
+    date: '2026-06-10',
+    notes: 'Late night sushi dinner',
+  },
+  {
+    id: 't10',
+    title: 'Stock Dividend payout',
+    amount: 125.00,
+    type: 'income',
+    category: 'Investments',
+    date: '2026-06-04',
+    notes: 'Quarterly index fund dividend',
+  }
+];
+
+export const INITIAL_BUDGETS: Budget[] = [
+  { category: 'Food & Dining', limit: 400, spent: 181.10, color: '#F87171' },
+  { category: 'Shopping', limit: 300, spent: 120.00, color: '#EC4899' },
+  { category: 'Transport', limit: 150, spent: 45.00, color: '#60A5FA' },
+  { category: 'Leisure & Health', limit: 100, spent: 84.98, color: '#A78BFA' },
+  { category: 'Utilities', limit: 200, spent: 88.40, color: '#2DD4BF' },
+];

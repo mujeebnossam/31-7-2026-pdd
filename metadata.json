@@ -1,0 +1,6 @@
+{
+  "name": "Expense Tracker",
+  "description": "A premium, dark-themed Expense Tracker with interactive analytics, custom budgets, and personalized AI financial insights Powered by Gemini.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
