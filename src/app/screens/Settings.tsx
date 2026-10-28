@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Card, Badge, Button, Input, Toggle, Avatar } from "../components/ui";
 import { useApp } from "../context/AppContext";
+import { authApi } from "../services/api";
 
 type SettingsScreen = "home" | "profile" | "notifications" | "security" | "accounts" | "preferences" | "help" | "about";
 
@@ -15,13 +16,20 @@ export function Settings() {
     setCurrency,
     accounts,
     addAccount,
+    updateAccount,
     removeAccount,
     addNotification,
+    logout,
+    convertAndFormat,
   } = useApp();
 
-  const [profileName, setProfileName] = useState(user.name);
-  const [profileEmail, setProfileEmail] = useState(user.email);
-  const [profilePhone, setProfilePhone] = useState(user.phone);
+  const [profileName, setProfileName] = useState(user?.name || "");
+  const [profileEmail, setProfileEmail] = useState(user?.email || "");
+  const [profilePhone, setProfilePhone] = useState(user?.phone || "");
+
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
   const [notifs, setNotifs] = useState({
     budgetAlerts: true,
@@ -38,15 +46,29 @@ export function Settings() {
     autoSync: true,
   });
 
-  // Modal or custom form to add a new bank account
+  // Accounts state
   const [isAddingAccount, setIsAddingAccount] = useState(false);
-  const [newAccData, setNewAccData] = useState({
-    name: "HDFC Savings Account",
-    bank: "HDFC Bank",
+  const [isAddingCustomAccount, setIsAddingCustomAccount] = useState(false);
+  const [editingAccount, setEditingAccount] = useState<any | null>(null);
+  const [accError, setAccError] = useState<string | null>(null);
+  const [isAccSaving, setIsAccSaving] = useState(false);
+
+  const [customAcc, setCustomAcc] = useState({
+    name: "",
+    bank: "",
     type: "checking",
-    balance: "150000",
-    last4: "4920",
-    color: "#1e3a8a",
+    balance: "",
+    last4: "",
+    color: "#3b82f6",
+  });
+
+  const [editAccData, setEditAccData] = useState({
+    name: "",
+    bank: "",
+    type: "checking",
+    balance: "",
+    last4: "",
+    color: "#3b82f6",
   });
 
   // Screen 43: Settings Home
@@ -109,13 +131,40 @@ export function Settings() {
             </Card>
           </div>
         ))}
-        <Button variant="danger" fullWidth onClick={() => {}}>Sign Out</Button>
+        <div className="pt-2">
+          <Button
+            variant="secondary"
+            fullWidth
+            onClick={logout}
+            className="border border-border hover:bg-secondary flex items-center justify-center gap-2 text-muted-foreground hover:text-foreground font-medium"
+          >
+            <span>🚪</span> Log Out
+          </Button>
+        </div>
       </div>
     );
   }
 
   // Screen 44: Profile & Account
   if (screen === "profile") {
+    const handleDeleteAccount = async () => {
+      setIsDeleting(true);
+      setDeleteError(null);
+      try {
+        await authApi.deleteAccount();
+        logout();
+      } catch (err: any) {
+        console.error('Failed to delete account:', err);
+        setDeleteError(err.message || 'Failed to delete account. Please try again.');
+        setIsDeleting(false);
+        setShowDeleteConfirm(false);
+      }
+    };
+
+    const handleLogout = () => {
+      logout();
+    };
+
     const handleSave = () => {
       setUser({
         ...user,
@@ -146,8 +195,16 @@ export function Settings() {
             <button className="absolute -bottom-1 -right-1 w-6 h-6 rounded-full bg-primary flex items-center justify-center text-white text-xs">✏️</button>
           </div>
           <p className="text-foreground font-medium">{user.name}</p>
-          <Badge variant="primary">Pro Plan · Member since {user.memberSince}</Badge>
+          <Badge variant="primary">Pro Plan · Member since {user.memberSince || "Recent"}</Badge>
         </div>
+
+        {deleteError && (
+          <div className="p-3.5 bg-red-500/10 border border-red-500/30 rounded-xl text-red-400 text-sm flex items-center gap-2">
+            <span>⚠️</span>
+            <span>{deleteError}</span>
+          </div>
+        )}
+
         <Card>
           <div className="flex flex-col gap-4">
             <Input label="Full Name" value={profileName} onChange={setProfileName} />
@@ -167,8 +224,59 @@ export function Settings() {
             </div>
           </Card>
         </div>
-        <Button fullWidth onClick={handleSave}>Save Changes</Button>
-        <Button variant="danger" fullWidth>Delete Account</Button>
+
+        <div className="flex flex-col gap-3 pt-2">
+          <Button fullWidth onClick={handleSave}>Save Changes</Button>
+
+          {/* Clearly visible Log Out button */}
+          <Button
+            variant="secondary"
+            fullWidth
+            onClick={handleLogout}
+            className="border border-border hover:bg-secondary flex items-center justify-center gap-2 text-foreground font-medium"
+          >
+            <span>🚪</span> Log Out
+          </Button>
+
+          {/* Delete Account confirmation dialog / button */}
+          {showDeleteConfirm ? (
+            <div className="p-4 bg-red-500/10 border border-red-500/40 rounded-xl flex flex-col gap-3">
+              <div>
+                <p className="text-sm font-semibold text-red-400">Permanently Delete Account?</p>
+                <p className="text-xs text-muted-foreground mt-1 leading-relaxed">
+                  This will permanently delete your account and remove all associated bank accounts, transactions, budgets, goals, and bills. This action cannot be undone.
+                </p>
+              </div>
+              <div className="flex gap-2">
+                <Button
+                  variant="danger"
+                  className="flex-1"
+                  onClick={handleDeleteAccount}
+                  disabled={isDeleting}
+                >
+                  {isDeleting ? "Deleting Account..." : "Yes, Delete Account"}
+                </Button>
+                <Button
+                  variant="secondary"
+                  className="flex-1"
+                  onClick={() => setShowDeleteConfirm(false)}
+                  disabled={isDeleting}
+                >
+                  Cancel
+                </Button>
+              </div>
+            </div>
+          ) : (
+            <Button
+              variant="danger"
+              fullWidth
+              onClick={() => setShowDeleteConfirm(true)}
+              disabled={isDeleting}
+            >
+              Delete Account
+            </Button>
+          )}
+        </div>
       </div>
     );
   }
@@ -282,81 +390,384 @@ export function Settings() {
 
   // Screen 47: Connected Accounts
   if (screen === "accounts") {
-    const handleAddPreset = (bankPreset: { name: string, bank: string, balance: number, last4: string, color: string, type: string }) => {
-      addAccount(bankPreset);
-      addNotification({
-        id: "notif_acc_" + Date.now(),
-        type: "insight",
-        message: `🏦 Connected new ${bankPreset.bank} account successfully!`,
-        time: "Just now",
-        read: false,
-      });
-      setIsAddingAccount(false);
+    const handleAddPreset = async (bankPreset: { name: string, bank: string, balance: number, last4: string, color: string, type: string }) => {
+      setIsAccSaving(true);
+      setAccError(null);
+      try {
+        await addAccount(bankPreset);
+        addNotification({
+          id: "notif_acc_" + Date.now(),
+          type: "insight",
+          message: `🏦 Connected new ${bankPreset.bank} account successfully!`,
+          time: "Just now",
+          read: false,
+        });
+        setIsAddingAccount(false);
+      } catch (err: any) {
+        setAccError(err.message || 'Failed to add account');
+      } finally {
+        setIsAccSaving(false);
+      }
     };
+
+    const handleCreateCustomAccount = async () => {
+      if (!customAcc.name.trim()) {
+        setAccError('Please enter an account name');
+        return;
+      }
+      setIsAccSaving(true);
+      setAccError(null);
+      try {
+        const bal = parseFloat(customAcc.balance) || 0;
+        await addAccount({
+          name: customAcc.name.trim(),
+          bank: customAcc.bank.trim() || 'Bank',
+          type: customAcc.type,
+          balance: bal,
+          last4: customAcc.last4.trim() || '0000',
+          color: customAcc.color || '#3b82f6',
+        });
+        setCustomAcc({
+          name: "",
+          bank: "",
+          type: "checking",
+          balance: "",
+          last4: "",
+          color: "#3b82f6",
+        });
+        setIsAddingCustomAccount(false);
+      } catch (err: any) {
+        setAccError(err.message || 'Failed to create account');
+      } finally {
+        setIsAccSaving(false);
+      }
+    };
+
+    const handleStartEdit = (acc: any) => {
+      setEditingAccount(acc);
+      setEditAccData({
+        name: acc.name,
+        bank: acc.bank || '',
+        type: acc.type || 'checking',
+        balance: String(acc.balance),
+        last4: acc.last4 || '',
+        color: acc.color || '#3b82f6',
+      });
+      setAccError(null);
+    };
+
+    const handleSaveEdit = async () => {
+      if (!editingAccount) return;
+      if (!editAccData.name.trim()) {
+        setAccError('Account name cannot be empty');
+        return;
+      }
+      setIsAccSaving(true);
+      setAccError(null);
+      try {
+        await updateAccount(editingAccount.id, {
+          name: editAccData.name.trim(),
+          bank: editAccData.bank.trim() || 'Bank',
+          type: editAccData.type,
+          balance: parseFloat(editAccData.balance) || 0,
+          last4: editAccData.last4.trim() || '0000',
+          color: editAccData.color,
+        });
+        setEditingAccount(null);
+      } catch (err: any) {
+        setAccError(err.message || 'Failed to update account');
+      } finally {
+        setIsAccSaving(false);
+      }
+    };
+
+    const handleDeleteAcc = async (id: string, name: string) => {
+      if (!window.confirm(`Are you sure you want to remove "${name}"? Transactions associated with this account will remain in your ledger.`)) {
+        return;
+      }
+      setIsAccSaving(true);
+      setAccError(null);
+      try {
+        await removeAccount(id);
+      } catch (err: any) {
+        setAccError(err.message || 'Failed to remove account');
+      } finally {
+        setIsAccSaving(false);
+      }
+    };
+
+    const totalLiquid = accounts.reduce((sum, a) => sum + (Number(a.balance) || 0), 0);
 
     return (
       <div className="flex flex-col gap-5 pb-6">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
             <button onClick={() => setScreen("home")} className="text-muted-foreground hover:text-foreground">←</button>
-            <h2 className="text-xl">Connected Accounts</h2>
+            <h2 className="text-xl">Accounts & Wallets</h2>
           </div>
-          <Button size="sm" onClick={() => setIsAddingAccount(!isAddingAccount)}>
-            {isAddingAccount ? "Cancel" : "+ Quick Link"}
-          </Button>
+          <div className="flex gap-2">
+            <Button size="sm" variant="secondary" onClick={() => { setIsAddingAccount(!isAddingAccount); setIsAddingCustomAccount(false); }}>
+              {isAddingAccount ? "Cancel" : "⚡ Presets"}
+            </Button>
+            <Button size="sm" onClick={() => { setIsAddingCustomAccount(!isAddingCustomAccount); setIsAddingAccount(false); }}>
+              {isAddingCustomAccount ? "Cancel" : "+ Custom"}
+            </Button>
+          </div>
         </div>
 
+        {/* Total Liquid Summary Banner */}
+        <Card className="border-primary/30 bg-gradient-to-r from-primary/10 via-primary/5 to-transparent">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-xs text-muted-foreground uppercase tracking-wider font-semibold">Total Accounts Balance</p>
+              <p className="text-2xl font-bold font-mono text-foreground mt-0.5">{convertAndFormat(totalLiquid)}</p>
+            </div>
+            <Badge variant="primary">{accounts.length} {accounts.length === 1 ? 'Account' : 'Accounts'}</Badge>
+          </div>
+        </Card>
+
+        {accError && (
+          <div className="p-3.5 bg-red-500/10 border border-red-500/30 rounded-xl text-red-400 text-sm flex items-center gap-2">
+            <span>⚠️</span>
+            <span>{accError}</span>
+          </div>
+        )}
+
+        {/* Custom Account Form */}
+        {isAddingCustomAccount && (
+          <Card className="border-primary/40 bg-accent/30 flex flex-col gap-4 py-4">
+            <h3 className="text-sm font-semibold text-foreground">Add New Account or Wallet</h3>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <Input
+                label="Account Name"
+                placeholder="e.g. Main Checking, Cash Wallet"
+                value={customAcc.name}
+                onChange={v => setCustomAcc(p => ({ ...p, name: v }))}
+              />
+              <Input
+                label="Institution / Bank"
+                placeholder="e.g. Chase, HDFC, Cash"
+                value={customAcc.bank}
+                onChange={v => setCustomAcc(p => ({ ...p, bank: v }))}
+              />
+              <div className="flex flex-col gap-1.5">
+                <label className="text-sm text-muted-foreground">Account Type</label>
+                <select
+                  value={customAcc.type}
+                  onChange={e => setCustomAcc(p => ({ ...p, type: e.target.value }))}
+                  className="bg-input-background border border-border rounded-lg py-2.5 px-3 text-foreground focus:outline-none focus:border-primary/60 text-sm"
+                >
+                  <option value="checking">🏦 Checking / Current</option>
+                  <option value="savings">💰 Savings Account</option>
+                  <option value="credit">💳 Credit Card</option>
+                  <option value="cash">💵 Cash / Wallet</option>
+                  <option value="investment">📈 Investment Account</option>
+                  <option value="other">📁 Other</option>
+                </select>
+              </div>
+              <Input
+                label="Initial Balance ($)"
+                placeholder="0.00"
+                type="number"
+                value={customAcc.balance}
+                onChange={v => setCustomAcc(p => ({ ...p, balance: v }))}
+              />
+              <Input
+                label="Last 4 Digits (Optional)"
+                placeholder="1234"
+                value={customAcc.last4}
+                onChange={v => setCustomAcc(p => ({ ...p, last4: v.slice(0, 4) }))}
+              />
+              <div className="flex flex-col gap-1.5">
+                <label className="text-sm text-muted-foreground">Color Theme</label>
+                <div className="flex items-center gap-2 pt-1">
+                  {["#3b82f6", "#10b981", "#8b5cf6", "#f59e0b", "#ef4444", "#06b6d4"].map(c => (
+                    <button
+                      key={c}
+                      type="button"
+                      onClick={() => setCustomAcc(p => ({ ...p, color: c }))}
+                      className={`w-7 h-7 rounded-full border-2 transition-all ${customAcc.color === c ? 'border-foreground scale-110' : 'border-transparent'}`}
+                      style={{ backgroundColor: c }}
+                    />
+                  ))}
+                </div>
+              </div>
+            </div>
+            <div className="flex gap-2 pt-2">
+              <Button onClick={handleCreateCustomAccount} disabled={isAccSaving || !customAcc.name.trim()} className="flex-1">
+                {isAccSaving ? "Creating Account..." : "Save Account"}
+              </Button>
+              <Button variant="secondary" onClick={() => setIsAddingCustomAccount(false)}>
+                Cancel
+              </Button>
+            </div>
+          </Card>
+        )}
+
+        {/* Edit Account Modal / Card */}
+        {editingAccount && (
+          <Card className="border-primary/50 bg-primary/5 flex flex-col gap-4 py-4">
+            <div className="flex items-center justify-between">
+              <h3 className="text-sm font-semibold text-foreground">Edit Account: {editingAccount.name}</h3>
+              <button onClick={() => setEditingAccount(null)} className="text-muted-foreground hover:text-foreground text-sm">✕</button>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <Input
+                label="Account Name"
+                value={editAccData.name}
+                onChange={v => setEditAccData(p => ({ ...p, name: v }))}
+              />
+              <Input
+                label="Institution / Bank"
+                value={editAccData.bank}
+                onChange={v => setEditAccData(p => ({ ...p, bank: v }))}
+              />
+              <div className="flex flex-col gap-1.5">
+                <label className="text-sm text-muted-foreground">Account Type</label>
+                <select
+                  value={editAccData.type}
+                  onChange={e => setEditAccData(p => ({ ...p, type: e.target.value }))}
+                  className="bg-input-background border border-border rounded-lg py-2.5 px-3 text-foreground focus:outline-none focus:border-primary/60 text-sm"
+                >
+                  <option value="checking">🏦 Checking / Current</option>
+                  <option value="savings">💰 Savings Account</option>
+                  <option value="credit">💳 Credit Card</option>
+                  <option value="cash">💵 Cash / Wallet</option>
+                  <option value="investment">📈 Investment Account</option>
+                  <option value="other">📁 Other</option>
+                </select>
+              </div>
+              <Input
+                label="Current Balance ($)"
+                type="number"
+                value={editAccData.balance}
+                onChange={v => setEditAccData(p => ({ ...p, balance: v }))}
+              />
+              <Input
+                label="Last 4 Digits"
+                value={editAccData.last4}
+                onChange={v => setEditAccData(p => ({ ...p, last4: v }))}
+              />
+              <div className="flex flex-col gap-1.5">
+                <label className="text-sm text-muted-foreground">Color Theme</label>
+                <div className="flex items-center gap-2 pt-1">
+                  {["#3b82f6", "#10b981", "#8b5cf6", "#f59e0b", "#ef4444", "#06b6d4"].map(c => (
+                    <button
+                      key={c}
+                      type="button"
+                      onClick={() => setEditAccData(p => ({ ...p, color: c }))}
+                      className={`w-7 h-7 rounded-full border-2 transition-all ${editAccData.color === c ? 'border-foreground scale-110' : 'border-transparent'}`}
+                      style={{ backgroundColor: c }}
+                    />
+                  ))}
+                </div>
+              </div>
+            </div>
+            <div className="flex gap-2 pt-2">
+              <Button onClick={handleSaveEdit} disabled={isAccSaving || !editAccData.name.trim()} className="flex-1">
+                {isAccSaving ? "Saving..." : "Update Account"}
+              </Button>
+              <Button variant="secondary" onClick={() => setEditingAccount(null)}>
+                Cancel
+              </Button>
+            </div>
+          </Card>
+        )}
+
+        {/* Quick Presets */}
         {isAddingAccount && (
           <Card className="border-primary/40 bg-accent/30 flex flex-col gap-3 py-4">
-            <p className="text-sm font-semibold text-foreground">Select an Indian Bank Account to link instantly:</p>
-            <div className="grid grid-cols-1 gap-2.5">
+            <p className="text-sm font-semibold text-foreground">Select a Bank Preset to link instantly:</p>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
               {[
-                { name: "HDFC Priority Savings", bank: "HDFC Bank", balance: 2500, last4: "9820", color: "#1e3a8a", type: "checking" },
-                { name: "SBI Maxima Savings", bank: "State Bank of India", balance: 950, last4: "7124", color: "#0284c7", type: "checking" },
-                { name: "ICICI Coral Card", bank: "ICICI Bank", balance: -350, last4: "4410", color: "#ea580c", type: "credit" },
-                { name: "Axis Prestige Account", bank: "Axis Bank", balance: 1400, last4: "1093", color: "#800020", type: "checking" },
+                { name: "Chase Total Checking", bank: "Chase", balance: 3500, last4: "8821", color: "#3b82f6", type: "checking" },
+                { name: "HDFC Priority Savings", bank: "HDFC Bank", balance: 2500, last4: "9820", color: "#1e3a8a", type: "savings" },
+                { name: "SBI Maxima Savings", bank: "State Bank of India", balance: 950, last4: "7124", color: "#0284c7", type: "savings" },
+                { name: "Amex Gold Card", bank: "American Express", balance: -450, last4: "3004", color: "#ea580c", type: "credit" },
+                { name: "Cash Wallet", bank: "Cash", balance: 200, last4: "0000", color: "#10b981", type: "cash" },
+                { name: "Vanguard Index", bank: "Vanguard", balance: 8000, last4: "5512", color: "#8b5cf6", type: "investment" },
               ].map((b, idx) => (
                 <button
                   key={idx}
                   onClick={() => handleAddPreset(b)}
+                  disabled={isAccSaving}
                   className="flex items-center gap-3 p-3 rounded-lg bg-card border border-border hover:border-primary/50 text-left transition"
                 >
-                  <span className="text-xl">🏦</span>
+                  <span className="text-xl">
+                    {b.type === "checking" ? "🏦" : b.type === "savings" ? "💰" : b.type === "credit" ? "💳" : b.type === "cash" ? "💵" : "📈"}
+                  </span>
                   <div className="flex-1">
                     <p className="text-sm font-medium text-foreground">{b.name}</p>
                     <p className="text-xs text-muted-foreground">{b.bank} · ••••{b.last4}</p>
                   </div>
-                  <Badge variant="primary">Link Now</Badge>
+                  <Badge variant="primary">Add</Badge>
                 </button>
               ))}
             </div>
           </Card>
         )}
 
-        <Card className="border-emerald-500/20 bg-emerald-500/5">
-          <p className="text-emerald-400 text-sm">🔒 All connections secured with 256-bit encryption via Plaid</p>
-        </Card>
+        {/* Accounts List */}
+        {accounts.length === 0 ? (
+          <Card className="py-12 flex flex-col items-center justify-center text-center gap-3">
+            <span className="text-4xl">🏦</span>
+            <div>
+              <p className="text-foreground font-semibold">No accounts found</p>
+              <p className="text-muted-foreground text-xs mt-1 max-w-xs">
+                Link an account or add cash/card wallets to start recording transactions and tracking your net worth.
+              </p>
+            </div>
+            <div className="flex gap-2 mt-2">
+              <Button size="sm" onClick={() => setIsAddingCustomAccount(true)}>+ Add Custom Account</Button>
+              <Button size="sm" variant="secondary" onClick={() => setIsAddingAccount(true)}>⚡ Quick Presets</Button>
+            </div>
+          </Card>
+        ) : (
+          <div className="flex flex-col gap-3">
+            {accounts.map(acc => (
+              <Card key={acc.id} className="py-3">
+                <div className="flex items-center gap-3">
+                  <div
+                    className="w-10 h-10 rounded-xl flex items-center justify-center text-lg flex-shrink-0"
+                    style={{ backgroundColor: (acc.color || '#3b82f6') + "20", border: `1px solid ${(acc.color || '#3b82f6')}40` }}
+                  >
+                    {acc.type === "checking" ? "🏦" : acc.type === "savings" ? "💰" : acc.type === "credit" ? "💳" : acc.type === "cash" ? "💵" : "📈"}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2">
+                      <p className="text-foreground text-sm font-semibold truncate">{acc.name}</p>
+                      <Badge variant="neutral" className="text-[10px] py-0 capitalize">{acc.type}</Badge>
+                    </div>
+                    <p className="text-muted-foreground text-xs">{acc.bank} · ••••{acc.last4}</p>
+                  </div>
+                  <div className="flex flex-col items-end gap-1 flex-shrink-0">
+                    <p className="font-mono text-sm font-bold text-foreground">
+                      {convertAndFormat(acc.balance)}
+                    </p>
+                    <div className="flex items-center gap-3">
+                      <button
+                        onClick={() => handleStartEdit(acc)}
+                        className="text-primary text-xs hover:underline font-medium"
+                      >
+                        Edit
+                      </button>
+                      <button
+                        onClick={() => handleDeleteAcc(acc.id, acc.name)}
+                        className="text-red-400 text-xs hover:underline font-mono"
+                      >
+                        Remove
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </Card>
+            ))}
+          </div>
+        )}
 
-        <div className="flex flex-col gap-3">
-          {accounts.map(acc => (
-            <Card key={acc.id} className="py-3">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-xl flex items-center justify-center" style={{ backgroundColor: acc.color + "20", border: `1px solid ${acc.color}30` }}>
-                  {acc.type === "checking" ? "🏦" : acc.type === "savings" ? "💰" : acc.type === "credit" ? "💳" : "📈"}
-                </div>
-                <div className="flex-1">
-                  <p className="text-foreground text-sm font-medium">{acc.name}</p>
-                  <p className="text-muted-foreground text-xs">{acc.bank} · ••••{acc.last4}</p>
-                </div>
-                <div className="flex flex-col items-end gap-1">
-                  <Badge variant="success">Connected</Badge>
-                  <button onClick={() => removeAccount(acc.id)} className="text-red-400 text-xs hover:underline mt-1 font-mono">Remove</button>
-                </div>
-              </div>
-            </Card>
-          ))}
-        </div>
-        <p className="text-muted-foreground text-xs text-center">Connections powered by Plaid. We never store your banking credentials.</p>
+        <Card className="border-emerald-500/20 bg-emerald-500/5">
+          <p className="text-emerald-400 text-xs text-center">🔒 All account records are stored securely and isolated to your authenticated profile.</p>
+        </Card>
       </div>
     );
   }

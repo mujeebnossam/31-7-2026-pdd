@@ -1,17 +1,22 @@
 import { useState } from "react";
 import { Button, Input, Card } from "../components/ui";
+import { useApp } from "../context/AppContext";
+import { authApi, setToken } from "../services/api";
 
 type OnboardingScreen = "splash" | "welcome" | "signin" | "signup" | "connect" | "goals";
 
 interface OnboardingProps {
-  onComplete: () => void;
+  onComplete?: () => void;
 }
 
 export function Onboarding({ onComplete }: OnboardingProps) {
   const [screen, setScreen] = useState<OnboardingScreen>("splash");
+  const { setUser } = useApp();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [name, setName] = useState("");
+  const [authError, setAuthError] = useState<string | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const [selectedBank, setSelectedBank] = useState<string | null>(null);
   const [selectedGoals, setSelectedGoals] = useState<string[]>([]);
 
@@ -30,10 +35,10 @@ export function Onboarding({ onComplete }: OnboardingProps) {
             <h1 className="text-4xl text-foreground mb-2" style={{ letterSpacing: "-0.03em" }}>SpendWise AI</h1>
             <p className="text-muted-foreground">Intelligent expense tracking & financial predictions powered by AI</p>
           </div>
-          <Button fullWidth size="lg" onClick={() => setScreen("welcome")}>
+          <Button fullWidth size="lg" onClick={() => { setAuthError(null); setScreen("welcome"); }}>
             Get Started
           </Button>
-          <button onClick={() => setScreen("signin")} className="text-muted-foreground hover:text-foreground text-sm transition-colors">
+          <button onClick={() => { setAuthError(null); setScreen("signin"); }} className="text-muted-foreground hover:text-foreground text-sm transition-colors">
             Already have an account? <span className="text-primary">Sign in</span>
           </button>
         </div>
@@ -51,7 +56,7 @@ export function Onboarding({ onComplete }: OnboardingProps) {
     ];
     return (
       <div className="min-h-screen bg-background flex flex-col px-6 py-12">
-        <button onClick={() => setScreen("splash")} className="text-muted-foreground hover:text-foreground mb-8 self-start text-sm flex items-center gap-1">
+        <button onClick={() => { setAuthError(null); setScreen("splash"); }} className="text-muted-foreground hover:text-foreground mb-8 self-start text-sm flex items-center gap-1">
           ← Back
         </button>
         <div className="flex-1 flex flex-col max-w-sm mx-auto w-full">
@@ -70,7 +75,7 @@ export function Onboarding({ onComplete }: OnboardingProps) {
               </div>
             ))}
           </div>
-          <Button fullWidth size="lg" onClick={() => setScreen("signup")}>
+          <Button fullWidth size="lg" onClick={() => { setAuthError(null); setScreen("signup"); }}>
             Create Free Account
           </Button>
           <p className="text-center text-muted-foreground text-xs mt-4">No credit card required • Free forever plan available</p>
@@ -81,21 +86,50 @@ export function Onboarding({ onComplete }: OnboardingProps) {
 
   // Screen 3: Sign Up
   if (screen === "signup") {
+    const handleRegister = async () => {
+      setIsSubmitting(true);
+      setAuthError(null);
+      try {
+        const res = await authApi.register(name, email, password);
+        setToken(res.token);
+        setUser(res.user);
+        setScreen('connect');
+      } catch (err: any) {
+        console.error('Registration failed', err);
+        setAuthError(err.message || 'Registration failed. Please try again.');
+      } finally {
+        setIsSubmitting(false);
+      }
+    };
+
     return (
       <div className="min-h-screen bg-background flex flex-col px-6 py-12">
-        <button onClick={() => setScreen("welcome")} className="text-muted-foreground hover:text-foreground mb-8 self-start text-sm flex items-center gap-1">
+        <button onClick={() => { setAuthError(null); setScreen("welcome"); }} className="text-muted-foreground hover:text-foreground mb-8 self-start text-sm flex items-center gap-1">
           ← Back
         </button>
         <div className="flex-1 flex flex-col max-w-sm mx-auto w-full">
           <h1 className="text-3xl mb-2" style={{ letterSpacing: "-0.02em" }}>Create your account</h1>
-          <p className="text-muted-foreground mb-8">Start tracking smarter in minutes.</p>
+          <p className="text-muted-foreground mb-6">Start tracking smarter in minutes.</p>
+
+          {authError && (
+            <div className="p-3 mb-4 bg-red-500/10 border border-red-500/30 rounded-xl text-red-400 text-sm flex items-center gap-2">
+              <span>⚠️</span>
+              <span>{authError}</span>
+            </div>
+          )}
+
           <div className="flex flex-col gap-4 mb-6">
             <Input label="Full name" placeholder="Alex Morgan" value={name} onChange={setName} />
             <Input label="Email address" placeholder="alex@email.com" value={email} onChange={setEmail} type="email" />
-            <Input label="Password" placeholder="8+ characters" value={password} onChange={setPassword} type="password" />
+            <Input label="Password" placeholder="6+ characters" value={password} onChange={setPassword} type="password" />
           </div>
-          <Button fullWidth size="lg" onClick={() => setScreen("connect")} disabled={!name || !email || !password}>
-            Create Account
+          <Button
+            fullWidth
+            size="lg"
+            onClick={handleRegister}
+            disabled={!name || !email || !password || isSubmitting}
+          >
+            {isSubmitting ? "Creating Account..." : "Create Account"}
           </Button>
           <div className="flex items-center gap-3 my-6">
             <div className="flex-1 border-t border-border" />
@@ -107,7 +141,7 @@ export function Onboarding({ onComplete }: OnboardingProps) {
           </Button>
           <p className="text-center text-muted-foreground text-xs mt-6">
             Already have an account?{" "}
-            <button onClick={() => setScreen("signin")} className="text-primary">Sign in</button>
+            <button onClick={() => { setAuthError(null); setScreen("signin"); }} className="text-primary hover:underline">Sign in</button>
           </p>
           <p className="text-center text-muted-foreground text-xs mt-2">
             By creating an account, you agree to our Terms & Privacy Policy.
@@ -119,33 +153,62 @@ export function Onboarding({ onComplete }: OnboardingProps) {
 
   // Screen 4: Sign In
   if (screen === "signin") {
+    const handleLogin = async () => {
+      setIsSubmitting(true);
+      setAuthError(null);
+      try {
+        const res = await authApi.login(email, password);
+        setToken(res.token);
+        setUser(res.user);
+        onComplete?.();
+      } catch (err: any) {
+        console.error('Login failed', err);
+        setAuthError(err.message || 'Invalid email or password');
+      } finally {
+        setIsSubmitting(false);
+      }
+    };
+
     return (
       <div className="min-h-screen bg-background flex flex-col px-6 py-12">
-        <button onClick={() => setScreen("splash")} className="text-muted-foreground hover:text-foreground mb-8 self-start text-sm flex items-center gap-1">
+        <button onClick={() => { setAuthError(null); setScreen("splash"); }} className="text-muted-foreground hover:text-foreground mb-8 self-start text-sm flex items-center gap-1">
           ← Back
         </button>
         <div className="flex-1 flex flex-col max-w-sm mx-auto w-full">
           <h1 className="text-3xl mb-2" style={{ letterSpacing: "-0.02em" }}>Welcome back</h1>
-          <p className="text-muted-foreground mb-8">Sign in to your SpendWise account.</p>
+          <p className="text-muted-foreground mb-6">Sign in to your SpendWise account.</p>
+
+          {authError && (
+            <div className="p-3 mb-4 bg-red-500/10 border border-red-500/30 rounded-xl text-red-400 text-sm flex items-center gap-2">
+              <span>⚠️</span>
+              <span>{authError}</span>
+            </div>
+          )}
+
           <div className="flex flex-col gap-4 mb-6">
             <Input label="Email address" placeholder="alex@email.com" value={email} onChange={setEmail} type="email" />
             <Input label="Password" placeholder="••••••••" value={password} onChange={setPassword} type="password" />
           </div>
           <button className="text-primary text-sm self-end mb-6 hover:text-primary/80">Forgot password?</button>
-          <Button fullWidth size="lg" onClick={onComplete}>
-            Sign In
+          <Button
+            fullWidth
+            size="lg"
+            onClick={handleLogin}
+            disabled={!email || !password || isSubmitting}
+          >
+            {isSubmitting ? "Signing in..." : "Sign In"}
           </Button>
           <div className="flex items-center gap-3 my-6">
             <div className="flex-1 border-t border-border" />
             <span className="text-muted-foreground text-sm">or</span>
             <div className="flex-1 border-t border-border" />
           </div>
-          <Button fullWidth variant="secondary" onClick={onComplete}>
+          <Button fullWidth variant="secondary" onClick={() => onComplete?.()}>
             <span>🍎</span> Continue with Apple
           </Button>
           <p className="text-center text-muted-foreground text-xs mt-6">
             Don't have an account?{" "}
-            <button onClick={() => setScreen("signup")} className="text-primary">Create one</button>
+            <button onClick={() => { setAuthError(null); setScreen("signup"); }} className="text-primary hover:underline">Create one</button>
           </p>
         </div>
       </div>

@@ -1,398 +1,687 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import ReactMarkdown from "react-markdown";
-import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, BarChart, Bar, Cell, ReferenceLine } from "recharts";
+import {
+  BarChart,
+  Bar,
+  XAxis,
+  YAxis,
+  Tooltip,
+  ResponsiveContainer,
+  ReferenceLine,
+  LineChart,
+  Line,
+} from "recharts";
 import { Card, Badge, Button } from "../components/ui";
-import { mockAIInsights, mockSpendingByMonth } from "../data/mockData";
+import {
+  aiApi,
+  ApiFinancialSummary,
+  ApiFinancialPredictions,
+  ApiAIInsight,
+} from "../services/api";
+import { useApp } from "../context/AppContext";
 
-type InsightScreen = "home" | "predictions" | "savings" | "anomaly" | "forecast";
+type AIScreenTab = "chat" | "insights" | "predictions" | "anomalies" | "subscriptions";
+type InsightFilter = "all" | "alerts" | "savings" | "goals" | "bills";
 
-interface AIInsightsProps {
-  transactions?: any[];
-  budgets?: any[];
-}
+export function AIInsights() {
+  const { user, convertAndFormat } = useApp();
+  const [tab, setTab] = useState<AIScreenTab>("chat");
+  const [insightFilter, setInsightFilter] = useState<InsightFilter>("all");
 
-export function AIInsights({ transactions = [], budgets = [] }: AIInsightsProps) {
-  const [screen, setScreen] = useState<InsightScreen>("home");
+  // AI Data State
+  const [summary, setSummary] = useState<ApiFinancialSummary | null>(null);
+  const [predictions, setPredictions] = useState<ApiFinancialPredictions | null>(null);
+  const [insights, setInsights] = useState<ApiAIInsight[]>([]);
+  const [isLoadingData, setIsLoadingData] = useState(true);
+  const [dataError, setDataError] = useState<string | null>(null);
+
+  // Chat State
   const [chatMsg, setChatMsg] = useState("");
-  const [chatHistory, setChatHistory] = useState([
-    { role: "ai", text: "Hi Mujeeb! I'm your SpendWise AI assistant. Ask me anything about your finances." },
+  const [isThinking, setIsThinking] = useState(false);
+  const [conversationId, setConversationId] = useState<string | undefined>(undefined);
+  const [chatHistory, setChatHistory] = useState<
+    { role: "user" | "assistant"; text: string; time?: string }[]
+  >([
+    {
+      role: "assistant",
+      text: `Hello **${user?.name || "there"}**! I'm **SpendWise AI**, your personal financial intelligence advisor. I have direct real-time access to your ledger. Ask me about your spending patterns, savings opportunities, upcoming bills, goals, or next-month predictions!`,
+    },
   ]);
 
-  const sendChat = async () => {
-    if (!chatMsg.trim()) return;
-    const msg = chatMsg;
-    setChatMsg("");
-
-    // Add user message to history immediately
-    setChatHistory(prev => [...prev, { role: "user", text: msg }]);
-    
-    // Add temporary loading indicator
-    setChatHistory(prev => [...prev, { role: "ai", text: "Thinking... 🤖" }]);
-    
+  // Load live AI analysis
+  const loadAIData = async () => {
+    setIsLoadingData(true);
+    setDataError(null);
     try {
-      const res = await fetch("/api/chat", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          prompt: msg,
-          transactions,
-          budgets
-        })
-      });
-      const data = await res.json();
-      
-      setChatHistory(prev => {
-        // Remove temporary indicator and append real response
-        const filtered = prev.filter(item => item.text !== "Thinking... 🤖");
-        return [...filtered, { role: "ai", text: data.text || "Sorry, I could not generate advice at this moment." }];
-      });
-    } catch (err) {
-      setChatHistory(prev => {
-        const filtered = prev.filter(item => item.text !== "Thinking... 🤖");
-        return [...filtered, { role: "ai", text: "Failed to connect to the financial intelligence server. Please try again." }];
-      });
+      const [sum, preds, ins] = await Promise.all([
+        aiApi.getSummary(),
+        aiApi.getPredictions(),
+        aiApi.getInsights(),
+      ]);
+      setSummary(sum);
+      setPredictions(preds);
+      setInsights(ins);
+    } catch (err: any) {
+      console.error("Failed to load AI intelligence data:", err);
+      setDataError(err.message || "AI insights temporarily unavailable. Your ledger is safe.");
+    } finally {
+      setIsLoadingData(false);
     }
   };
 
-  // Screen 20: AI Insights Home
-  if (screen === "home") {
-    const typeColor: Record<string, string> = { saving: "#10b981", alert: "#f59e0b", prediction: "#6366f1", goal: "#3b82f6" };
-    const typeBg: Record<string, string> = { saving: "border-emerald-500/20 bg-emerald-500/5", alert: "border-amber-500/20 bg-amber-500/5", prediction: "border-primary/20 bg-primary/5", goal: "border-blue-500/20 bg-blue-500/5" };
-    return (
-      <div className="flex flex-col gap-6 pb-6 select-none font-sans">
-        <div className="flex items-center justify-between">
-          <div>
-            <h2 className="text-2xl font-bold text-foreground">AI Insights Hub</h2>
-            <p className="text-muted-foreground text-sm">Real-time predictive analytics and conversational intelligence.</p>
-          </div>
-          <Badge variant="primary" className="px-3 py-1 text-xs">5 active alerts</Badge>
-        </div>
+  useEffect(() => {
+    loadAIData();
+  }, []);
 
-        {/* Dynamic Responsive Multi-Column Layout */}
+  // Chat Submission Handler
+  const sendChat = async (presetPrompt?: string) => {
+    const promptToSend = presetPrompt || chatMsg;
+    if (!promptToSend.trim() || isThinking) return;
+
+    setChatMsg("");
+    setChatHistory(prev => [...prev, { role: "user", text: promptToSend.trim() }]);
+    setIsThinking(true);
+
+    try {
+      const res = await aiApi.chat(promptToSend.trim(), conversationId);
+      if (res.conversationId) setConversationId(res.conversationId);
+
+      setChatHistory(prev => [
+        ...prev,
+        { role: "assistant", text: res.response || "No response received." },
+      ]);
+    } catch (err: any) {
+      setChatHistory(prev => [
+        ...prev,
+        {
+          role: "assistant",
+          text: `⚠️ **Error connecting to AI advisor:** ${err.message || "Please check connection."}\n\n*Your local database calculations are still fully active.*`,
+        },
+      ]);
+    } finally {
+      setIsThinking(false);
+    }
+  };
+
+  const clearChat = async () => {
+    try {
+      await aiApi.clearConversations();
+    } catch (e) {
+      console.error("Failed to clear conversations", e);
+    }
+    setConversationId(undefined);
+    setChatHistory([
+      {
+        role: "assistant",
+        text: `Conversation cleared. How can I assist you with your finances today?`,
+      },
+    ]);
+  };
+
+  // Filtered Insights
+  const filteredInsights = insights.filter(ins => {
+    if (insightFilter === "alerts") return ins.severity === "danger" || ins.severity === "warning";
+    if (insightFilter === "savings") return ins.type === "saving" || ins.type === "spending";
+    if (insightFilter === "goals") return ins.type === "goal";
+    if (insightFilter === "bills") return ins.type === "bill" || ins.type === "subscription";
+    return true;
+  });
+
+  const severityColor: Record<string, string> = {
+    danger: "border-red-500/30 bg-red-500/10 text-red-400",
+    warning: "border-amber-500/30 bg-amber-500/10 text-amber-400",
+    success: "border-emerald-500/30 bg-emerald-500/10 text-emerald-400",
+    info: "border-primary/30 bg-primary/10 text-primary",
+  };
+
+  // Dynamic Chart for Predictions
+  const forecastChartData = [
+    ...(summary?.trendHistory || []).map(m => ({
+      name: m.label,
+      actual: m.expenses,
+      predicted: m.expenses,
+      income: m.income,
+    })),
+    {
+      name: predictions?.nextMonth.monthLabel.split(" ")[0] || "Next Mo",
+      actual: null,
+      predicted: predictions?.nextMonth.predictedExpenses || 0,
+      income: predictions?.nextMonth.predictedIncome || 0,
+    },
+  ];
+
+  return (
+    <div className="flex flex-col gap-6 pb-8 select-none font-sans">
+      {/* Header */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+        <div>
+          <h2 className="text-2xl font-bold text-foreground flex items-center gap-2">
+            <span>🤖</span> SpendWise AI Intelligence Hub
+          </h2>
+          <p className="text-muted-foreground text-xs sm:text-sm">
+            Autonomous financial modeling, anomaly detection & conversational advisor
+          </p>
+        </div>
+        <div className="flex items-center gap-2">
+          {summary && (
+            <Badge
+              variant={
+                summary.financialHealth.score >= 700
+                  ? "success"
+                  : summary.financialHealth.score >= 550
+                  ? "primary"
+                  : "warning"
+              }
+              className="font-mono text-xs px-3 py-1"
+            >
+              Health: {summary.financialHealth.score}/850 ({summary.financialHealth.grade})
+            </Badge>
+          )}
+        </div>
+      </div>
+
+      {dataError && (
+        <div className="p-3.5 bg-red-500/10 border border-red-500/30 rounded-xl text-red-400 text-xs sm:text-sm flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <span>⚠️</span>
+            <span>{dataError}</span>
+          </div>
+          <button
+            onClick={loadAIData}
+            className="px-2.5 py-1 bg-red-500/20 rounded-lg text-xs font-semibold hover:bg-red-500/30 transition"
+          >
+            Retry
+          </button>
+        </div>
+      )}
+
+      {/* Core Differentiation Banner */}
+      <div className="p-3.5 bg-gradient-to-r from-primary/10 via-violet-500/10 to-transparent border border-primary/20 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
+        <div className="flex items-start gap-2.5">
+          <span className="text-xl">🧠</span>
+          <div>
+            <p className="font-bold text-foreground">Financial Intelligence vs Payment Apps</p>
+            <p className="text-muted-foreground text-[11px] leading-relaxed">
+              Payment applications execute transfers; SpendWise AI unifies multi-source data (Manual, CSV Statements, UPI Feeds) into an autonomous financial intelligence layer with automated budget control, predictive cashflow modeling, anomaly auditing, and wealth recommendations.
+            </p>
+          </div>
+        </div>
+        <div className="flex items-center gap-1.5 flex-shrink-0">
+          <Badge variant="primary" className="text-[10px]">Multi-Source</Badge>
+          <Badge variant="success" className="text-[10px]">PostgreSQL Verified</Badge>
+        </div>
+      </div>
+
+      {/* Top Nav Tabs */}
+      <div className="flex gap-2 p-1.5 bg-secondary rounded-2xl border border-border/50 overflow-x-auto scrollbar-none">
+        {[
+          { id: "chat", icon: "💬", label: "AI Advisor" },
+          { id: "insights", icon: "💡", label: `Insights (${insights.length})` },
+          { id: "predictions", icon: "🔮", label: "Predictions" },
+          { id: "anomalies", icon: "🔍", label: `Anomalies (${summary?.anomalies.length || 0})` },
+          { id: "subscriptions", icon: "📱", label: `Subscriptions (${summary?.subscriptions.length || 0})` },
+        ].map(item => (
+          <button
+            key={item.id}
+            onClick={() => setTab(item.id as AIScreenTab)}
+            className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs sm:text-sm font-semibold transition-all whitespace-nowrap ${
+              tab === item.id
+                ? "bg-primary text-white shadow-md shadow-primary/20"
+                : "text-muted-foreground hover:text-foreground hover:bg-background/40"
+            }`}
+          >
+            <span>{item.icon}</span>
+            <span>{item.label}</span>
+          </button>
+        ))}
+      </div>
+
+      {/* ─── TAB 1: CONVERSATIONAL ASSISTANT ─────────────────────────────────── */}
+      {tab === "chat" && (
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 items-start">
-          
-          {/* Main Space (Col-span 2): Chat Interface & Interactive Scenarios */}
-          <div className="lg:col-span-2 flex flex-col gap-6">
-            
-            {/* AI Assistant Chat Section */}
-            <Card className="border-primary/20 flex flex-col p-6">
-              <div className="flex items-center justify-between mb-4 pb-3 border-b border-border/80">
-                <p className="text-foreground font-bold text-base flex items-center gap-2">
-                  <span>🤖</span> Ask SpendWise Financial Intelligence
-                </p>
-                <div className="flex items-center gap-1.5 text-xs text-muted-foreground font-mono">
-                  <span className="w-2.5 h-2.5 bg-emerald-500 rounded-full animate-pulse" />
-                  Agent Online
+          {/* Main Chat Stream (Col 2) */}
+          <div className="lg:col-span-2 flex flex-col gap-4">
+            <Card className="p-4 sm:p-6 flex flex-col border-primary/20">
+              <div className="flex items-center justify-between pb-3 border-b border-border mb-4">
+                <div className="flex items-center gap-2">
+                  <span className="w-3 h-3 bg-emerald-500 rounded-full animate-pulse" />
+                  <span className="text-foreground font-bold text-sm">Auden, Certified AI Wealth Coach</span>
                 </div>
+                <button
+                  onClick={clearChat}
+                  className="text-xs text-muted-foreground hover:text-red-400 transition"
+                  title="Clear chat history"
+                >
+                  🗑️ Clear Chat
+                </button>
               </div>
 
-              {/* Chat Message Box */}
-              <div className="bg-muted rounded-xl p-4 mb-4 h-64 overflow-y-auto flex flex-col gap-3 scrollbar-none">
+              {/* Chat Messages */}
+              <div className="h-96 overflow-y-auto flex flex-col gap-3.5 pr-1 scrollbar-none mb-4">
                 {chatHistory.map((m, i) => (
-                  <div key={i} className={`flex ${m.role === "user" ? "justify-end" : "justify-start"}`}>
-                    <div className={`max-w-[85%] px-4 py-2.5 rounded-2xl text-sm leading-relaxed ${m.role === "user" ? "bg-primary text-white" : "bg-secondary text-foreground text-left"}`}>
+                  <div
+                    key={i}
+                    className={`flex ${m.role === "user" ? "justify-end" : "justify-start"}`}
+                  >
+                    <div
+                      className={`max-w-[88%] sm:max-w-[80%] px-4 py-3 rounded-2xl text-xs sm:text-sm leading-relaxed ${
+                        m.role === "user"
+                          ? "bg-primary text-white rounded-br-none shadow-md shadow-primary/10"
+                          : "bg-secondary text-foreground rounded-bl-none border border-border/40 text-left"
+                      }`}
+                    >
                       {m.role === "user" ? (
                         m.text
                       ) : (
-                        <div className="markdown-body">
+                        <div className="prose prose-invert prose-sm max-w-none space-y-2">
                           <ReactMarkdown>{m.text}</ReactMarkdown>
                         </div>
                       )}
                     </div>
                   </div>
                 ))}
+                {isThinking && (
+                  <div className="flex justify-start">
+                    <div className="bg-secondary text-foreground text-xs px-4 py-2.5 rounded-2xl rounded-bl-none border border-border flex items-center gap-2">
+                      <span className="w-2 h-2 bg-primary rounded-full animate-bounce" />
+                      <span className="w-2 h-2 bg-primary rounded-full animate-bounce [animation-delay:0.2s]" />
+                      <span className="w-2 h-2 bg-primary rounded-full animate-bounce [animation-delay:0.4s]" />
+                      <span className="text-muted-foreground font-mono">Analyzing PostgreSQL ledger...</span>
+                    </div>
+                  </div>
+                )}
               </div>
 
-              {/* Message inputs */}
+              {/* Prompt Suggestions */}
+              <div className="flex gap-2 overflow-x-auto pb-2 scrollbar-none mb-3">
+                {[
+                  "📊 Analyze my spending",
+                  "💡 How can I save more?",
+                  "🔮 Predict next month",
+                  "🎯 Am I on track for goals?",
+                  "📅 What bills are coming up?",
+                  "💎 Financial health summary",
+                ].map(prompt => (
+                  <button
+                    key={prompt}
+                    onClick={() => sendChat(prompt)}
+                    disabled={isThinking}
+                    className="text-[11px] sm:text-xs px-3 py-1.5 bg-secondary border border-border/60 text-muted-foreground hover:text-foreground hover:border-primary/50 rounded-xl transition whitespace-nowrap flex-shrink-0"
+                  >
+                    {prompt}
+                  </button>
+                ))}
+              </div>
+
+              {/* Input Area */}
               <div className="flex gap-2">
                 <input
+                  type="text"
                   value={chatMsg}
                   onChange={e => setChatMsg(e.target.value)}
                   onKeyDown={e => e.key === "Enter" && sendChat()}
-                  placeholder="Ask me: 'How can I save $200 this month?' or 'Is my grocery bill typical?'..."
-                  className="flex-1 bg-input-background border border-border rounded-xl px-4 py-3 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-primary/60 transition-colors"
+                  placeholder="Ask Auden anything: 'Where am I spending most?' or 'Can I afford to save $500?'..."
+                  disabled={isThinking}
+                  className="flex-1 bg-input-background border border-border rounded-xl px-4 py-3 text-xs sm:text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-primary/60 transition"
                 />
-                <button onClick={sendChat} className="px-5 py-3 bg-primary text-white rounded-xl text-sm font-semibold hover:bg-primary/95 shadow-md shadow-primary/10 transition-all">Send</button>
+                <Button
+                  onClick={() => sendChat()}
+                  disabled={!chatMsg.trim() || isThinking}
+                  className="px-5 py-3"
+                >
+                  Send
+                </Button>
               </div>
             </Card>
-
-            {/* Quick Prediction & Forecasting Tools */}
-            <div>
-              <h3 className="text-foreground font-semibold mb-3 text-sm uppercase tracking-wider font-mono">Analytic Perspectives</h3>
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                {[
-                  { icon: "📈", label: "Predictions", desc: "Trend modeling", screen: "predictions" as InsightScreen },
-                  { icon: "💡", label: "Save Money", desc: "Outflow cuts", screen: "savings" as InsightScreen },
-                  { icon: "🚨", label: "Anomalies", desc: "Outliers alerts", screen: "anomaly" as InsightScreen },
-                  { icon: "🔮", label: "Forecast", desc: "Next quarter", screen: "forecast" as InsightScreen },
-                ].map(item => (
-                  <Card key={item.label} hover onClick={() => setScreen(item.screen)} className="flex flex-col items-start gap-2 p-4 cursor-pointer text-left">
-                    <span className="text-3xl">{item.icon}</span>
-                    <div>
-                      <h4 className="text-foreground text-sm font-bold">{item.label}</h4>
-                      <p className="text-muted-foreground text-[11px]">{item.desc}</p>
-                    </div>
-                  </Card>
-                ))}
-              </div>
-            </div>
-
           </div>
 
-          {/* Sidebar Area (Col-span 1): Recommendations and Alerts Feed */}
-          <div className="lg:col-span-1 flex flex-col gap-6">
-            
-            <div className="flex flex-col gap-3">
-              <div className="flex items-center justify-between pb-2 border-b border-border/60">
-                <h3 className="text-foreground font-semibold text-sm uppercase tracking-wider font-mono">Interactive Insights</h3>
-                <span className="text-muted-foreground text-xs">{mockAIInsights.length} suggestions</span>
-              </div>
+          {/* AI Financial Summary Card (Col 1) */}
+          <div className="flex flex-col gap-4">
+            {summary ? (
+              <Card className="p-5 border-primary/20 bg-secondary/40 flex flex-col gap-4">
+                <div>
+                  <p className="text-xs font-mono text-primary font-bold uppercase tracking-wider">
+                    Ledger Snapshot
+                  </p>
+                  <p className="text-xl font-bold text-foreground font-mono mt-0.5">
+                    {convertAndFormat(summary.netWorth)}
+                  </p>
+                  <p className="text-xs text-muted-foreground">Total Net Worth Across Accounts</p>
+                </div>
 
-              {mockAIInsights.map(ins => (
-                <Card key={ins.id} className={`${typeBg[ins.type]} border p-4.5`}>
-                  <div className="flex gap-3 items-start">
-                    <span className="text-2xl mt-0.5">{ins.icon}</span>
-                    <div className="flex-1">
-                      <div className="flex items-start justify-between gap-1 mb-1">
-                        <p className="text-foreground text-sm font-semibold leading-snug">{ins.title}</p>
-                        <Badge variant="neutral" className="text-[10px] font-mono px-2 py-0 border-white/5 bg-secondary">{ins.confidence}% accuracy</Badge>
-                      </div>
-                      <p className="text-muted-foreground text-xs leading-relaxed">{ins.description}</p>
-                      {ins.impact > 0 && (
-                        <p className="mt-2 text-xs font-semibold" style={{ color: typeColor[ins.type] }}>
-                          Estimated savings: +${ins.impact}/yr
-                        </p>
-                      )}
+                <div className="grid grid-cols-2 gap-2 text-xs">
+                  <div className="bg-background/60 p-2.5 rounded-xl border border-border/40">
+                    <p className="text-muted-foreground text-[10px]">Inflows (Mo)</p>
+                    <p className="font-mono font-bold text-emerald-400 mt-0.5">
+                      {convertAndFormat(summary.currentMonth.income)}
+                    </p>
+                  </div>
+                  <div className="bg-background/60 p-2.5 rounded-xl border border-border/40">
+                    <p className="text-muted-foreground text-[10px]">Outflows (Mo)</p>
+                    <p className="font-mono font-bold text-foreground mt-0.5">
+                      {convertAndFormat(summary.currentMonth.expenses)}
+                    </p>
+                  </div>
+                  <div className="bg-background/60 p-2.5 rounded-xl border border-border/40">
+                    <p className="text-muted-foreground text-[10px]">Savings Rate</p>
+                    <p className="font-mono font-bold text-indigo-400 mt-0.5">
+                      {summary.currentMonth.savingsRate}%
+                    </p>
+                  </div>
+                  <div className="bg-background/60 p-2.5 rounded-xl border border-border/40">
+                    <p className="text-muted-foreground text-[10px]">Bills Due (Mo)</p>
+                    <p className="font-mono font-bold text-amber-400 mt-0.5">
+                      {convertAndFormat(summary.upcomingBillsTotal)}
+                    </p>
+                  </div>
+                </div>
+
+                {summary.topCategories.length > 0 && (
+                  <div>
+                    <p className="text-xs font-semibold text-foreground mb-2">Top Outflow Category</p>
+                    <div className="flex items-center justify-between text-xs bg-background/50 p-2.5 rounded-xl border border-border/30">
+                      <span className="font-medium text-foreground truncate">
+                        {summary.topCategories[0].category}
+                      </span>
+                      <span className="font-mono font-bold text-foreground">
+                        {convertAndFormat(summary.topCategories[0].amount)} ({summary.topCategories[0].percentage}%)
+                      </span>
                     </div>
+                  </div>
+                )}
+
+                <div className="p-3 bg-primary/10 border border-primary/20 rounded-xl text-xs leading-relaxed text-muted-foreground">
+                  💡 <strong className="text-foreground">AI Tip:</strong>{" "}
+                  {summary.financialHealth.recommendation}
+                </div>
+              </Card>
+            ) : (
+              <Card className="p-6 text-center text-xs text-muted-foreground">
+                Loading financial metrics...
+              </Card>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ─── TAB 2: STRUCTURED INSIGHTS ───────────────────────────────────────── */}
+      {tab === "insights" && (
+        <div className="flex flex-col gap-5">
+          {/* Sub-Filters */}
+          <div className="flex gap-2 overflow-x-auto scrollbar-none">
+            {[
+              { id: "all", label: `All (${insights.length})` },
+              { id: "alerts", label: "🚨 Alerts & Warnings" },
+              { id: "savings", label: "💡 Savings & Outflows" },
+              { id: "goals", label: "🎯 Goals" },
+              { id: "bills", label: "📅 Bills & Subs" },
+            ].map(f => (
+              <button
+                key={f.id}
+                onClick={() => setInsightFilter(f.id as InsightFilter)}
+                className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition ${
+                  insightFilter === f.id
+                    ? "bg-primary text-white"
+                    : "bg-secondary text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                {f.label}
+              </button>
+            ))}
+          </div>
+
+          {filteredInsights.length === 0 ? (
+            <Card className="py-12 text-center text-xs text-muted-foreground">
+              No insights found for this filter. As you log more transactions, new opportunities will emerge automatically.
+            </Card>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {filteredInsights.map(ins => (
+                <Card
+                  key={ins.id}
+                  className={`p-4 border ${severityColor[ins.severity]} flex flex-col justify-between`}
+                >
+                  <div>
+                    <div className="flex items-start justify-between gap-2 mb-2">
+                      <div className="flex items-center gap-2">
+                        <span className="text-2xl">{ins.icon}</span>
+                        <div>
+                          <p className="text-foreground text-sm font-bold">{ins.title}</p>
+                          <span className="text-[10px] uppercase tracking-wider font-mono text-muted-foreground">
+                            {ins.category}
+                          </span>
+                        </div>
+                      </div>
+                      <Badge variant={ins.severity === "danger" ? "danger" : ins.severity === "warning" ? "warning" : "success"}>
+                        {ins.severity.toUpperCase()}
+                      </Badge>
+                    </div>
+                    <p className="text-muted-foreground text-xs leading-relaxed mt-2">{ins.description}</p>
+                    {ins.supportingMetric && (
+                      <p className="text-xs font-mono font-semibold text-foreground mt-2">
+                        📌 {ins.supportingMetric}
+                      </p>
+                    )}
+                  </div>
+                  <div className="mt-4 pt-3 border-t border-border/40 flex items-center justify-between text-xs">
+                    <span className="text-foreground font-medium">👉 {ins.action}</span>
+                    {ins.impact && ins.impact > 0 && (
+                      <span className="font-mono font-bold text-emerald-400 ml-2 whitespace-nowrap">
+                        {convertAndFormat(ins.impact)}
+                      </span>
+                    )}
                   </div>
                 </Card>
               ))}
             </div>
-
-          </div>
-
+          )}
         </div>
-      </div>
-    );
-  }
+      )}
 
-  // Screen 21: Spending Predictions
-  if (screen === "predictions") {
-    const monthData = [
-      { month: "Jun", predicted: 2723, actual: 2723 },
-      { month: "Jul", predicted: 2650, actual: null },
-      { month: "Aug", predicted: 2580, actual: null },
-      { month: "Sep", predicted: 2720, actual: null },
-    ];
-    return (
-      <div className="flex flex-col gap-5 pb-6">
-        <div className="flex items-center gap-3">
-          <button onClick={() => setScreen("home")} className="text-muted-foreground hover:text-foreground">←</button>
-          <h2 className="text-xl">Spending Predictions</h2>
-        </div>
-        <Card className="border-primary/20 bg-primary/5">
-          <p className="text-primary text-sm font-medium mb-1">🤖 AI Forecast</p>
-          <p className="text-muted-foreground text-sm">Based on 6 months of data, your spending is trending downward. You're likely to save an extra $143 next month if you maintain current habits.</p>
-        </Card>
-        <Card>
-          <p className="text-foreground text-sm mb-3">4-Month Forecast</p>
-          <div className="h-48">
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={monthData} margin={{ top: 0, right: 0, bottom: 0, left: -15 }}>
-                <XAxis dataKey="month" tick={{ fill: "#6b7494", fontSize: 11 }} axisLine={false} tickLine={false} />
-                <YAxis tick={{ fill: "#6b7494", fontSize: 11 }} axisLine={false} tickLine={false} />
-                <Tooltip
-                  contentStyle={{ backgroundColor: "#0f1628", border: "1px solid rgba(255,255,255,0.08)", borderRadius: "8px" }}
-                  labelStyle={{ color: "#6b7494" }}
-                  itemStyle={{ color: "#e8eaf0" }}
-                />
-                <ReferenceLine y={3000} stroke="#ef4444" strokeDasharray="3 3" strokeOpacity={0.5} />
-                {monthData.map((d, i) => (
-                  <Bar key={i} dataKey="predicted" fill={d.actual !== null ? "#6366f1" : "#6366f150"} radius={[4, 4, 0, 0]} />
-                ))}
-              </BarChart>
-            </ResponsiveContainer>
-          </div>
-        </Card>
-        <div className="flex flex-col gap-3">
-          {[
-            { cat: "Food & Drink", predicted: 340, trend: "↑ up 18%", color: "#ef4444" },
-            { cat: "Shopping", predicted: 95, trend: "↓ down 9%", color: "#10b981" },
-            { cat: "Transportation", predicted: 78, trend: "→ stable", color: "#6b7494" },
-            { cat: "Entertainment", predicted: 42, trend: "↓ down 12%", color: "#10b981" },
-          ].map(p => (
-            <Card key={p.cat} className="flex items-center justify-between py-3">
-              <span className="text-foreground text-sm">{p.cat}</span>
-              <div className="flex items-center gap-3">
-                <span className="text-xs" style={{ color: p.color }}>{p.trend}</span>
-                <span className="font-mono text-foreground text-sm">${p.predicted}</span>
+      {/* ─── TAB 3: SPENDING & CASHFLOW PREDICTIONS ─────────────────────────── */}
+      {tab === "predictions" && (
+        <div className="flex flex-col gap-6">
+          {predictions ? (
+            <>
+              {/* Prediction Hero */}
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                <Card className="p-4 text-center border-primary/30 bg-primary/5">
+                  <p className="text-xs text-muted-foreground font-medium">Predicted Next Month Outflow</p>
+                  <p className="font-mono text-2xl font-extrabold text-foreground mt-1">
+                    {convertAndFormat(predictions.nextMonth.predictedExpenses)}
+                  </p>
+                  <p className="text-[11px] text-muted-foreground mt-1">Weighted historical moving average</p>
+                </Card>
+                <Card className="p-4 text-center border-emerald-500/30 bg-emerald-500/5">
+                  <p className="text-xs text-muted-foreground font-medium">Predicted Next Month Net Flow</p>
+                  <p className="font-mono text-2xl font-extrabold text-emerald-400 mt-1">
+                    {convertAndFormat(predictions.nextMonth.predictedNetCashFlow)}
+                  </p>
+                  <p className="text-[11px] text-muted-foreground mt-1">
+                    Savings rate: {predictions.nextMonth.predictedSavingsRate}%
+                  </p>
+                </Card>
+                <Card className="p-4 text-center border-indigo-500/30 bg-indigo-500/5">
+                  <p className="text-xs text-muted-foreground font-medium">Financial Trajectory</p>
+                  <p className="text-xl font-bold text-indigo-400 uppercase tracking-wider mt-1">
+                    {predictions.trajectory.trend}
+                  </p>
+                  <p className="text-[11px] text-muted-foreground mt-1">
+                    Confidence: <span className="uppercase font-mono">{predictions.confidence}</span>
+                  </p>
+                </Card>
               </div>
-            </Card>
-          ))}
-        </div>
-      </div>
-    );
-  }
 
-  // Screen 22: Saving Opportunities
-  if (screen === "savings") {
-    const opportunities = [
-      { title: "Cancel unused subscriptions", desc: "You haven't used Apple TV+ in 45 days. Cancel to save $9.99/month.", saving: 120, difficulty: "Easy", icon: "📺" },
-      { title: "Switch to store-brand groceries", desc: "Switching 30% of branded items could save $40-60/month on groceries.", saving: 600, difficulty: "Easy", icon: "🛒" },
-      { title: "Meal prep 3x per week", desc: "Reducing restaurant visits from 8 to 5 per month saves ~$80/month.", saving: 960, difficulty: "Medium", icon: "🍳" },
-      { title: "Refinance student loans", desc: "Current rates suggest refinancing could save $47/month.", saving: 564, difficulty: "Hard", icon: "🎓" },
-    ];
-    return (
-      <div className="flex flex-col gap-5 pb-6">
-        <div className="flex items-center gap-3">
-          <button onClick={() => setScreen("home")} className="text-muted-foreground hover:text-foreground">←</button>
-          <h2 className="text-xl">Save Money</h2>
-        </div>
-        <Card className="border-emerald-500/20 bg-emerald-500/5">
-          <p className="text-emerald-400 text-sm font-medium mb-1">💡 Total Savings Potential</p>
-          <p className="font-mono text-3xl text-emerald-400 font-bold">$2,244<span className="text-lg text-muted-foreground">/yr</span></p>
-          <p className="text-muted-foreground text-xs mt-1">If you act on all recommendations below</p>
-        </Card>
-        <div className="flex flex-col gap-3">
-          {opportunities.map(o => (
-            <Card key={o.title}>
-              <div className="flex gap-3">
-                <div className="w-10 h-10 rounded-xl bg-accent flex items-center justify-center text-xl flex-shrink-0">{o.icon}</div>
-                <div className="flex-1">
-                  <div className="flex items-start justify-between gap-2">
-                    <p className="text-foreground text-sm font-medium">{o.title}</p>
-                    <Badge variant={o.difficulty === "Easy" ? "success" : o.difficulty === "Medium" ? "warning" : "neutral"}>
-                      {o.difficulty}
-                    </Badge>
+              {/* 4-Month Forecast Chart */}
+              <Card className="p-5">
+                <div className="flex items-center justify-between mb-4">
+                  <div>
+                    <h4 className="text-foreground font-bold text-sm">Historical vs. Projected Outflow Modeling</h4>
+                    <p className="text-muted-foreground text-xs">Based on actual PostgreSQL ledger history</p>
                   </div>
-                  <p className="text-muted-foreground text-xs mt-1 leading-relaxed">{o.desc}</p>
-                  <div className="flex items-center justify-between mt-2">
-                    <span className="text-emerald-400 text-sm font-medium">Save ${o.saving}/yr</span>
-                    <button className="text-primary text-xs hover:underline">Take action →</button>
+                  <div className="flex items-center gap-3 text-xs">
+                    <span className="flex items-center gap-1">
+                      <span className="w-2.5 h-2.5 bg-primary rounded-full" /> Actual
+                    </span>
+                    <span className="flex items-center gap-1">
+                      <span className="w-2.5 h-2.5 bg-primary/40 rounded-full" /> Predicted
+                    </span>
                   </div>
                 </div>
-              </div>
-            </Card>
-          ))}
-        </div>
-      </div>
-    );
-  }
-
-  // Screen 23: Anomaly Detection
-  if (screen === "anomaly") {
-    const anomalies = [
-      { merchant: "Shell Gas Station", amount: 62.18, typical: 27, date: "Jun 10", severity: "medium", reason: "2.3x your typical gas spend" },
-      { merchant: "Amazon Prime", amount: 14.99, typical: 14.99, date: "Jun 9", severity: "low", reason: "Annual renewal may be upcoming" },
-      { merchant: "Cheesecake Factory", amount: 67.20, typical: 20, date: "Jun 5", severity: "high", reason: "3.4x your typical dining spend per visit" },
-    ];
-    return (
-      <div className="flex flex-col gap-5 pb-6">
-        <div className="flex items-center gap-3">
-          <button onClick={() => setScreen("home")} className="text-muted-foreground hover:text-foreground">←</button>
-          <h2 className="text-xl">Anomaly Detection</h2>
-        </div>
-        <Card className="border-amber-500/20 bg-amber-500/5">
-          <p className="text-amber-400 text-sm font-medium mb-1">🔍 AI Analysis</p>
-          <p className="text-muted-foreground text-sm">SpendWise AI scans every transaction for unusual patterns. We detected 3 anomalies this month worth reviewing.</p>
-        </Card>
-        <div className="flex flex-col gap-3">
-          {anomalies.map(a => (
-            <Card key={a.merchant} className={a.severity === "high" ? "border-red-500/30" : a.severity === "medium" ? "border-amber-500/30" : "border-border"}>
-              <div className="flex items-start gap-3">
-                <div className={`w-2 h-2 rounded-full mt-2 flex-shrink-0 ${a.severity === "high" ? "bg-red-400" : a.severity === "medium" ? "bg-amber-400" : "bg-blue-400"}`} />
-                <div className="flex-1">
-                  <div className="flex justify-between items-start">
-                    <p className="text-foreground text-sm font-medium">{a.merchant}</p>
-                    <span className="font-mono text-red-400 text-sm">-${a.amount}</span>
-                  </div>
-                  <p className="text-muted-foreground text-xs">{a.date} · Typical: ${a.typical}</p>
-                  <p className="text-amber-400 text-xs mt-1">⚠️ {a.reason}</p>
-                  <div className="flex gap-2 mt-2">
-                    <button className="text-xs text-primary hover:underline">Mark as expected</button>
-                    <span className="text-muted-foreground">·</span>
-                    <button className="text-xs text-destructive hover:underline">Flag as issue</button>
-                  </div>
-                </div>
-              </div>
-            </Card>
-          ))}
-        </div>
-        <div>
-          <h3 className="text-foreground mb-3">Reviewed This Month</h3>
-          <div className="flex flex-col gap-2">
-            {[
-              { merchant: "Netflix", amount: 15.99, status: "Expected" },
-              { merchant: "Planet Fitness", amount: 24.99, status: "Expected" },
-            ].map(r => (
-              <Card key={r.merchant} className="flex items-center justify-between py-2.5 opacity-60">
-                <span className="text-foreground text-sm">{r.merchant}</span>
-                <div className="flex items-center gap-2">
-                  <Badge variant="success">{r.status}</Badge>
-                  <span className="font-mono text-muted-foreground text-sm">${r.amount}</span>
+                <div className="h-60">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart data={forecastChartData} margin={{ top: 10, right: 10, bottom: 0, left: -20 }}>
+                      <XAxis dataKey="name" tick={{ fill: "#6b7494", fontSize: 11 }} axisLine={false} tickLine={false} />
+                      <YAxis tick={{ fill: "#6b7494", fontSize: 11 }} axisLine={false} tickLine={false} />
+                      <Tooltip
+                        contentStyle={{
+                          backgroundColor: "#0f1628",
+                          border: "1px solid rgba(255,255,255,0.1)",
+                          borderRadius: "8px",
+                        }}
+                        formatter={(val: any) => [convertAndFormat(val), "Outflow"]}
+                      />
+                      <Bar dataKey="actual" fill="#6366f1" radius={[4, 4, 0, 0]} />
+                      <Bar dataKey="predicted" fill="#6366f160" radius={[4, 4, 0, 0]} />
+                    </BarChart>
+                  </ResponsiveContainer>
                 </div>
               </Card>
-            ))}
-          </div>
-        </div>
-      </div>
-    );
-  }
 
-  // Screen 24: Financial Forecast
-  if (screen === "forecast") {
-    const forecastData = [
-      ...mockSpendingByMonth.map(d => ({ ...d, type: "actual" })),
-      { month: "Jul", income: 4300, expenses: 2650, type: "predicted" },
-      { month: "Aug", income: 4300, expenses: 2580, type: "predicted" },
-      { month: "Sep", income: 4300, expenses: 2720, type: "predicted" },
-    ];
-    return (
-      <div className="flex flex-col gap-5 pb-6">
-        <div className="flex items-center gap-3">
-          <button onClick={() => setScreen("home")} className="text-muted-foreground hover:text-foreground">←</button>
-          <h2 className="text-xl">Financial Forecast</h2>
-        </div>
-        <Card>
-          <div className="flex justify-between items-center mb-3">
-            <p className="text-foreground text-sm">9-Month Overview</p>
-            <div className="flex gap-3">
-              <div className="flex items-center gap-1"><div className="w-2.5 h-0.5 bg-primary rounded" /><span className="text-xs text-muted-foreground">Actual</span></div>
-              <div className="flex items-center gap-1"><div className="w-2.5 h-0.5 bg-primary/40 rounded border-dashed border border-primary/40" /><span className="text-xs text-muted-foreground">Predicted</span></div>
-            </div>
-          </div>
-          <div className="h-52">
-            <ResponsiveContainer width="100%" height="100%">
-              <LineChart data={forecastData} margin={{ top: 0, right: 0, bottom: 0, left: -20 }}>
-                <XAxis dataKey="month" tick={{ fill: "#6b7494", fontSize: 11 }} axisLine={false} tickLine={false} />
-                <YAxis tick={{ fill: "#6b7494", fontSize: 11 }} axisLine={false} tickLine={false} />
-                <Tooltip contentStyle={{ backgroundColor: "#0f1628", border: "1px solid rgba(255,255,255,0.08)", borderRadius: "8px" }} />
-                <Line type="monotone" dataKey="income" stroke="#10b981" strokeWidth={2} dot={false} />
-                <Line type="monotone" dataKey="expenses" stroke="#6366f1" strokeWidth={2} dot={false} strokeDasharray="4 2" />
-              </LineChart>
-            </ResponsiveContainer>
-          </div>
-        </Card>
-        <div className="grid grid-cols-2 gap-3">
-          {[
-            { label: "Projected savings (next 3mo)", value: "+$4,890", color: "#10b981" },
-            { label: "Projected net worth (Dec)", value: "$63,200", color: "#6366f1" },
-            { label: "Emergency fund completion", value: "Nov 2026", color: "#f59e0b" },
-            { label: "Japan trip funded by", value: "Jul 2026", color: "#3b82f6" },
-          ].map(s => (
-            <Card key={s.label}>
-              <p className="text-muted-foreground text-xs mb-1">{s.label}</p>
-              <p className="font-mono text-sm font-semibold" style={{ color: s.color }}>{s.value}</p>
+              {/* Category Spending Projections */}
+              <div>
+                <h4 className="text-foreground font-bold text-sm mb-3">Predicted Category Outflows</h4>
+                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
+                  {predictions.categoryPredictions.map(c => (
+                    <Card key={c.category} className="p-3.5 flex items-center justify-between">
+                      <div>
+                        <p className="text-foreground text-xs font-semibold">{c.category}</p>
+                        <p className="text-muted-foreground text-[11px]">
+                          Trend: <span className="capitalize">{c.trend}</span>
+                        </p>
+                      </div>
+                      <div className="text-right">
+                        <p className="font-mono text-sm font-bold text-foreground">
+                          {convertAndFormat(c.predictedAmount)}
+                        </p>
+                        <span
+                          className={`text-[10px] font-mono ${
+                            c.changePercent > 0
+                              ? "text-red-400"
+                              : c.changePercent < 0
+                              ? "text-emerald-400"
+                              : "text-muted-foreground"
+                          }`}
+                        >
+                          {c.changePercent > 0 ? `+${c.changePercent}%` : `${c.changePercent}%`}
+                        </span>
+                      </div>
+                    </Card>
+                  ))}
+                </div>
+              </div>
+
+              {/* Disclaimer */}
+              <p className="text-[11px] text-muted-foreground/80 italic text-center">
+                ℹ️ {predictions.disclaimer} ({predictions.confidenceReason})
+              </p>
+            </>
+          ) : (
+            <Card className="py-12 text-center text-xs text-muted-foreground">
+              Loading predictions...
             </Card>
-          ))}
+          )}
         </div>
-        <Card className="border-primary/20 bg-primary/5">
-          <p className="text-primary text-sm font-medium mb-2">🔮 Year-End Projection</p>
-          <p className="text-muted-foreground text-sm">At your current trajectory, you'll end 2026 with an estimated net worth of <span className="text-foreground font-medium">$63,200</span> — up <span className="text-emerald-400">+$20,800 (49%)</span> from the start of the year.</p>
-        </Card>
-      </div>
-    );
-  }
+      )}
 
-  return null;
+      {/* ─── TAB 4: ANOMALY DETECTION ────────────────────────────────────────── */}
+      {tab === "anomalies" && (
+        <div className="flex flex-col gap-5">
+          <Card className="p-4 border-amber-500/20 bg-amber-500/5">
+            <p className="text-amber-400 text-xs font-semibold mb-1">🔍 Autonomous Outlier Detection</p>
+            <p className="text-muted-foreground text-xs leading-relaxed">
+              SpendWise AI audits every transaction in your PostgreSQL ledger against category historical averages. Any expenditure exceeding 2.5x typical spending is flagged for review.
+            </p>
+          </Card>
+
+          {summary?.anomalies.length === 0 ? (
+            <Card className="py-12 text-center text-xs text-muted-foreground">
+              ✅ No spending anomalies detected in your recent transaction history. All outflows are within typical baseline behavior.
+            </Card>
+          ) : (
+            <div className="flex flex-col gap-3">
+              {summary?.anomalies.map(a => (
+                <Card
+                  key={a.transactionId}
+                  className={`p-4 border ${
+                    a.severity === "high" ? "border-red-500/40 bg-red-500/5" : "border-amber-500/30 bg-amber-500/5"
+                  }`}
+                >
+                  <div className="flex items-start justify-between gap-2">
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <span className="text-base">🚨</span>
+                        <p className="text-foreground text-sm font-bold">{a.title}</p>
+                        <Badge variant={a.severity === "high" ? "danger" : "warning"}>
+                          {a.multiplier}x typical
+                        </Badge>
+                      </div>
+                      <p className="text-muted-foreground text-xs mt-1">
+                        Category: <strong className="text-foreground">{a.category}</strong> · Date: {a.date}
+                      </p>
+                      <p className="text-amber-400 text-xs mt-1 font-medium">⚠️ {a.reason}</p>
+                    </div>
+                    <p className="font-mono text-base font-bold text-red-400 flex-shrink-0">
+                      -{convertAndFormat(a.amount)}
+                    </p>
+                  </div>
+                </Card>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ─── TAB 5: SUBSCRIPTION INTELLIGENCE ────────────────────────────────── */}
+      {tab === "subscriptions" && (
+        <div className="flex flex-col gap-5">
+          <Card className="p-4 border-primary/20 bg-primary/5">
+            <p className="text-primary text-xs font-semibold mb-1">📱 Subscription Portfolio Intelligence</p>
+            <p className="text-muted-foreground text-xs leading-relaxed">
+              You maintain <strong className="text-foreground">{summary?.subscriptions.length || 0} active subscriptions</strong> totaling{" "}
+              <strong className="text-indigo-400 font-mono">
+                {convertAndFormat(summary?.monthlyRecurringOutflow || 0)}/mo
+              </strong>{" "}
+              (<span className="font-mono text-foreground">{convertAndFormat(summary?.totalSubscriptionAnnualCost || 0)}/year</span>).
+            </p>
+          </Card>
+
+          {summary?.subscriptions.length === 0 ? (
+            <Card className="py-12 text-center text-xs text-muted-foreground">
+              No active recurring subscriptions found. Add subscriptions in the Bills tab to unlock automated subscription auditing.
+            </Card>
+          ) : (
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              {summary?.subscriptions.map(s => (
+                <Card key={s.id} className="p-4 flex items-center justify-between">
+                  <div>
+                    <p className="text-foreground text-sm font-bold">{s.name}</p>
+                    <p className="text-muted-foreground text-xs mt-0.5 capitalize">
+                      {s.frequency} billing · {convertAndFormat(s.monthlyEquivalent)}/mo
+                    </p>
+                  </div>
+                  <div className="text-right">
+                    <p className="font-mono text-sm font-bold text-foreground">
+                      {convertAndFormat(s.annualCost)}
+                    </p>
+                    <span className="text-[10px] text-muted-foreground font-mono">/year</span>
+                  </div>
+                </Card>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
 }

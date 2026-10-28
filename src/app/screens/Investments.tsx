@@ -19,8 +19,11 @@ export function Investments() {
       <div className="flex flex-col gap-6 pb-6">
         <div className="flex items-center justify-between">
           <div>
-            <h2 className="text-2xl font-bold tracking-tight text-foreground">Investments</h2>
-            <p className="text-muted-foreground text-sm">Monitor your global portfolio value and returns.</p>
+            <div className="flex items-center gap-2">
+              <h2 className="text-2xl font-bold tracking-tight text-foreground">Investments</h2>
+              <Badge variant="primary" className="text-[10px]">Portfolio Simulator</Badge>
+            </div>
+            <p className="text-muted-foreground text-sm">Monitor simulated asset allocations, ETF holdings, and returns.</p>
           </div>
           <button onClick={() => setScreen("add")} className="px-4 py-2 bg-primary text-white rounded-xl text-sm font-semibold hover:bg-primary/95 shadow-md shadow-primary/10 transition-colors">+ Add Position</button>
         </div>

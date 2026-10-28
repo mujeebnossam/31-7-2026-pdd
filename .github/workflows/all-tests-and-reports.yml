@@ -1,0 +1,238 @@
+name: Comprehensive Test Suite & Security Review (All 4 Tests)
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  # ==========================================================================
+  # Test 1: Selenium Web Frontend E2E Tests (300+ Test Cases)
+  # ==========================================================================
+  selenium-web-tests:
+    name: 1. Selenium E2E Web Tests (300+ Cases)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install Dependencies
+        run: |
+          TARGET_DIR="spendwise-ai"
+          [ ! -d "$TARGET_DIR" ] && TARGET_DIR="."
+          cd $TARGET_DIR
+          npm ci --legacy-peer-deps || npm install --legacy-peer-deps
+
+      - name: Execute Selenium E2E Test Suite
+        run: |
+          TARGET_DIR="spendwise-ai"
+          [ ! -d "$TARGET_DIR" ] && TARGET_DIR="."
+          cd $TARGET_DIR
+          node selenium-tests/tests/login-tests.js
+
+      - name: Upload Selenium Excel Test Report Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: selenium-test-report-excel
+          path: |
+            spendwise-ai/selenium-tests/selenium-test-report.xlsx
+            selenium-tests/selenium-test-report.xlsx
+          retention-days: 30
+
+  # ==========================================================================
+  # Test 2: Appium Mobile Frontend E2E Tests (300+ Test Cases)
+  # ==========================================================================
+  appium-mobile-tests:
+    name: 2. Appium Mobile E2E Tests (300+ Cases)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install Dependencies
+        run: |
+          TARGET_DIR="spendwise-ai"
+          [ ! -d "$TARGET_DIR" ] && TARGET_DIR="."
+          cd $TARGET_DIR
+          npm ci --legacy-peer-deps || npm install --legacy-peer-deps
+
+      - name: Execute Appium Mobile E2E Test Suite
+        run: |
+          TARGET_DIR="spendwise-ai"
+          [ ! -d "$TARGET_DIR" ] && TARGET_DIR="."
+          cd $TARGET_DIR
+          node appium-tests/tests/app-login-tests.js
+
+      - name: Upload Appium Excel Test Report Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: appium-test-report-excel
+          path: |
+            spendwise-ai/appium-tests/appium-test-report.xlsx
+            appium-tests/appium-test-report.xlsx
+          retention-days: 30
+
+  # ==========================================================================
+  # Test 3: Baseline Load & Concurrency Test (100 Virtual Users, 1 Minute)
+  # ==========================================================================
+  baseline-load-tests:
+    name: 3. Baseline Load Test (100 VUs / 1 Min)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install Dependencies
+        run: |
+          TARGET_DIR="spendwise-ai"
+          [ ! -d "$TARGET_DIR" ] && TARGET_DIR="."
+          cd $TARGET_DIR
+          npm ci --legacy-peer-deps || npm install --legacy-peer-deps
+
+      - name: Execute 100 VU Baseline Load Test
+        run: |
+          TARGET_DIR="spendwise-ai"
+          [ ! -d "$TARGET_DIR" ] && TARGET_DIR="."
+          cd $TARGET_DIR
+          node load-tests/baseline-load-test.js
+
+      - name: Publish Load Metrics to Action Summary
+        run: |
+          TARGET_DIR="spendwise-ai"
+          [ ! -d "$TARGET_DIR" ] && TARGET_DIR="."
+          if [ -f "$TARGET_DIR/load-tests/load-test-summary.md" ]; then
+            cat "$TARGET_DIR/load-tests/load-test-summary.md" >> $GITHUB_STEP_SUMMARY
+          fi
+
+      - name: Upload Load Test Excel Report Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: load-test-report-excel
+          path: |
+            spendwise-ai/load-tests/load-test-report.xlsx
+            load-tests/load-test-report.xlsx
+          retention-days: 30
+
+  # ==========================================================================
+  # Test 4: Security Assessment (SAST, DAST, Dependency Scan & Review)
+  # ==========================================================================
+  security-review-tests:
+    name: 4. Security Assessment & Vulnerability Audit
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install Dependencies
+        run: |
+          TARGET_DIR="spendwise-ai"
+          [ ! -d "$TARGET_DIR" ] && TARGET_DIR="."
+          cd $TARGET_DIR
+          npm ci --legacy-peer-deps || npm install --legacy-peer-deps
+
+      - name: Execute SAST Code Scanner
+        run: |
+          TARGET_DIR="spendwise-ai"
+          [ ! -d "$TARGET_DIR" ] && TARGET_DIR="."
+          cd $TARGET_DIR
+          node security-tests/run-sast-scan.js
+
+      - name: Execute DAST Live Verification
+        run: |
+          TARGET_DIR="spendwise-ai"
+          [ ! -d "$TARGET_DIR" ] && TARGET_DIR="."
+          cd $TARGET_DIR
+          node security-tests/run-dast-scan.js
+
+      - name: Generate Security Excel Workbooks & Markdown Deliverables
+        run: |
+          TARGET_DIR="spendwise-ai"
+          [ ! -d "$TARGET_DIR" ] && TARGET_DIR="."
+          cd $TARGET_DIR
+          node security-tests/generate-security-reports.js
+
+      - name: Upload Security Excel Workbooks Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: security-review-excel-reports
+          path: |
+            spendwise-ai/Vulnerability Test Results/
+            Vulnerability Test Results/
+          retention-days: 30
+
+  # ==========================================================================
+  # Master Artifact Bundle: All 5 Excel Test Reports in One Download
+  # ==========================================================================
+  consolidate-all-excel-reports:
+    name: 📦 Package All Excel Test Reports
+    needs: [selenium-web-tests, appium-mobile-tests, baseline-load-tests, security-review-tests]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install Dependencies
+        run: |
+          TARGET_DIR="spendwise-ai"
+          [ ! -d "$TARGET_DIR" ] && TARGET_DIR="."
+          cd $TARGET_DIR
+          npm ci --legacy-peer-deps || npm install --legacy-peer-deps
+
+      - name: Generate Fresh Excel Workbooks
+        run: |
+          TARGET_DIR="spendwise-ai"
+          [ ! -d "$TARGET_DIR" ] && TARGET_DIR="."
+          cd $TARGET_DIR
+          node selenium-tests/tests/login-tests.js
+          node appium-tests/tests/app-login-tests.js
+          node load-tests/baseline-load-test.js
+          node security-tests/generate-security-reports.js
+
+      - name: Assemble Master Excel Bundle Directory
+        run: |
+          mkdir -p master-excel-reports
+          TARGET_DIR="spendwise-ai"
+          [ ! -d "$TARGET_DIR" ] && TARGET_DIR="."
+          cp $TARGET_DIR/selenium-tests/selenium-test-report.xlsx master-excel-reports/01_Selenium_Web_E2E_Test_Report.xlsx
+          cp $TARGET_DIR/appium-tests/appium-test-report.xlsx master-excel-reports/02_Appium_Mobile_E2E_Test_Report.xlsx
+          cp $TARGET_DIR/load-tests/load-test-report.xlsx master-excel-reports/03_Baseline_Load_Test_Report.xlsx
+          cp "$TARGET_DIR/Vulnerability Test Results/endpoint-inventory.xlsx" master-excel-reports/04_API_Endpoint_Inventory.xlsx
+          cp "$TARGET_DIR/Vulnerability Test Results/findings.xlsx" master-excel-reports/05_Security_Findings_and_Risks.xlsx
+
+      - name: Upload Master All-Tests Excel Bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: all-test-excel-reports-bundle
+          path: master-excel-reports/
+          retention-days: 60

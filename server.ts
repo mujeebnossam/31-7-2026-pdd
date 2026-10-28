@@ -1,122 +1,181 @@
+// ⚠️ env.ts MUST be the first import — loads .env before any module reads process.env
+import "./server/config/env";
+
 import express from "express";
 import path from "path";
 import { createServer as createViteServer } from "vite";
 import { GoogleGenAI } from "@google/genai";
-import dotenv from "dotenv";
 
-// Load local environment variables
-dotenv.config();
+// ─── Database & Models ────────────────────────────────────────────────────────
+import { sequelize } from "./server/models/index";
+
+// ─── Routes ──────────────────────────────────────────────────────────────────
+import authRoutes from "./server/routes/authRoutes";
+import accountRoutes from "./server/routes/accountRoutes";
+import transactionRoutes from "./server/routes/transactionRoutes";
+import budgetRoutes from "./server/routes/budgetRoutes";
+import goalRoutes from "./server/routes/goalRoutes";
+import billRoutes from "./server/routes/billRoutes";
+import aiRoutes from "./server/routes/aiRoutes";
+import ingestionRoutes from "./server/routes/ingestionRoutes";
 
 async function startServer() {
   const app = express();
-  const PORT = 3000;
+  const PORT = parseInt(process.env.PORT || "3001", 10);
 
-  // Middleware to support incoming JSON payloads
+  // ─── Core Middleware ────────────────────────────────────────────────────────
   app.use(express.json());
+  app.use(express.urlencoded({ extended: true }));
 
-  // Instantiate standard server-side Gemini client securely
-  const apiKey = process.env.GEMINI_API_KEY;
-  const ai = new GoogleGenAI({
-    apiKey: apiKey,
-    httpOptions: {
-      headers: {
-        'User-Agent': 'aistudio-build',
-      }
-    }
-  });
+  // ─── Database Sync ──────────────────────────────────────────────────────────
+  // ⚠️  DEV ONLY: sequelize.sync({ alter: true }) auto-modifies tables to match
+  //    models. Do NOT use this in production — use proper migrations instead.
+  try {
+    await sequelize.authenticate();
+    console.log("✅ PostgreSQL connected successfully");
+    await sequelize.sync({ alter: true });
+    console.log("✅ Database tables synced (dev mode)");
+  } catch (err: any) {
+    console.error("❌ Database connection failed:", err.message);
+    console.warn("⚠️  Server will continue without database. Check DB_* env vars in .env");
+  }
 
-  // Health check
-  app.get("/api/health", (req, res) => {
+  // ─── Health Check ───────────────────────────────────────────────────────────
+  app.get("/api/health", (_req, res) => {
     res.json({ status: "active", uptime: process.uptime() });
   });
 
-  // Secure Server-side API endpoint for AI Financial Conversations
+  // ─── API Routes ─────────────────────────────────────────────────────────────
+  app.use("/api/auth", authRoutes);
+  app.use("/api/accounts", accountRoutes);
+  app.use("/api/transactions", transactionRoutes);
+  app.use("/api/budgets", budgetRoutes);
+  app.use("/api/goals", goalRoutes);
+  app.use("/api/bills", billRoutes);
+  app.use("/api/ai", aiRoutes);
+  app.use("/api/ingestion", ingestionRoutes);
+
+  // ─── AI Advisor (Groq / Gemini fallback) ────────────────────────────────────
   app.post("/api/chat", async (req, res) => {
     try {
       const { prompt, transactions = [], budgets = [] } = req.body;
+      const apiKey = process.env.GROQ_API_KEY || process.env.GEMINI_API_KEY || process.env.API_KEY;
 
-      if (!apiKey) {
+      if (!apiKey || apiKey.trim() === "") {
         return res.status(200).json({
-          text: "⚠️ **Gemini API key is not configured yet.**\n\nPlease add a valid key named **GEMINI_API_KEY** in the **Settings > Secrets** panel in AI Studio so I can analyze your financial ledgers."
+          text: "⚠️ **Groq API key is not configured.**\n\nPlease set your **GROQ_API_KEY** in the `.env` file to enable AI financial coaching.",
         });
       }
 
-      // Structure transaction context summary to supply context to the model
       const totalExpense = transactions
-        .filter((t: any) => t.type === 'expense')
-        .reduce((sum: number, t: any) => sum + t.amount, 0);
+        .filter((t: any) => t.type === "expense")
+        .reduce((sum: number, t: any) => sum + Math.abs(t.amount), 0);
 
       const totalIncome = transactions
-        .filter((t: any) => t.type === 'income')
+        .filter((t: any) => t.type === "income")
         .reduce((sum: number, t: any) => sum + t.amount, 0);
 
       const savings = totalIncome - totalExpense;
 
       const transactionsSummary = transactions
         .slice(0, 15)
-        .map((t: any) => `- ${t.date}: ${t.title} [${t.category}] spent $${t.amount} (${t.type})`)
+        .map((t: any) => `- ${t.date}: ${t.title || t.merchant} [${t.category}] $${t.amount} (${t.type})`)
         .join("\n");
 
       const budgetsSummary = budgets
-        .map((b: any) => `- ${b.category}: Limit $${b.limit}, Spent $${b.spent} (${((b.spent/b.limit)*100).toFixed(0)}% used)`)
+        .map((b: any) => `- ${b.category}: Limit $${b.budgeted ?? b.limit}, Spent $${b.spent} (${(((b.spent / (b.budgeted ?? b.limit)) * 100) || 0).toFixed(0)}% used)`)
         .join("\n");
 
-      // Formulate query for Auden
-      const fullPrompt = `The user "Mujeeb" is asking me a question regarding their active expense ledger.
-Here is Mujeeb's active financial context:
-Current Net Income: $${totalIncome.toFixed(2)}
-Current Net Expenses: $${totalExpense.toFixed(2)}
-Calculated Net Balance: $${savings.toFixed(2)}
+      const fullPrompt = `The user is asking a question about their active expense ledger.
+Financial Context:
+Net Income: $${totalIncome.toFixed(2)}
+Net Expenses: $${totalExpense.toFixed(2)}
+Net Balance: $${savings.toFixed(2)}
 
-Mujeeb's Active Category Budgets:
+Category Budgets:
 ${budgetsSummary || "No budgets set yet."}
 
-Mujeeb's Recent Transaction Items:
+Recent Transactions:
 ${transactionsSummary || "No transactions recorded yet."}
 
-User Question/Prompt: "${prompt}"
+User Question: "${prompt}"
 
-Provide actionable, brief, and highly scannable financial coaching recommendations. Be polite, encouraging, and write in first person as "Auden, the AI Financial Advisor". Use bolding to emphasize numbers and key terms. Make sure to provide a highly structured answer with bullet points.`;
+Provide actionable, brief, and highly scannable financial coaching. Write in first person as "Auden, AI Financial Advisor". Use bold for numbers and key terms. Use bullet points.`;
 
-      // Call Gemini 3.5 Flash Model
-      const response = await ai.models.generateContent({
-        model: "gemini-3.5-flash",
-        contents: fullPrompt,
-        config: {
-          systemInstruction: "You are Auden, a friendly, ultra-sharp certified senior financial advisor and wealth coach. You optimize budgets and teach users high-impact, actionable micro-saving habits. Keep your answers concise, structured in bullet lists, and easy for mobile screen reading. Speak directly to 'Mujeeb'.",
-          temperature: 0.7,
-        },
-      });
+      let aiText = "";
 
-      res.json({ text: response.text });
+      if (apiKey.startsWith("gsk_")) {
+        const groqRes = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${apiKey}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            model: "llama-3.3-70b-versatile",
+            messages: [
+              {
+                role: "system",
+                content:
+                  "You are Auden, a friendly, ultra-sharp certified senior financial advisor and wealth coach. Keep answers concise, structured in bullet lists, easy for mobile reading.",
+              },
+              { role: "user", content: fullPrompt },
+            ],
+            temperature: 0.7,
+          }),
+        });
+
+        if (!groqRes.ok) {
+          const errData = await groqRes.json().catch(() => ({}));
+          throw new Error(`Groq API error (${groqRes.status}): ${JSON.stringify(errData)}`);
+        }
+
+        const data: any = await groqRes.json();
+        aiText = data.choices?.[0]?.message?.content || "No response from Groq.";
+      } else {
+        const ai = new GoogleGenAI({
+          apiKey,
+          httpOptions: { headers: { "User-Agent": "spendwise-ai" } },
+        });
+        const response = await ai.models.generateContent({
+          model: "gemini-2.5-flash",
+          contents: fullPrompt,
+          config: {
+            systemInstruction:
+              "You are Auden, a friendly certified senior financial advisor. Keep answers concise, structured in bullet lists, easy for mobile reading.",
+            temperature: 0.7,
+          },
+        });
+        aiText = response.text || "No response from Gemini.";
+      }
+
+      res.json({ text: aiText });
     } catch (error: any) {
-      console.error("Gemini Advisor engine error:", error);
-      res.status(500).json({ 
-        error: "Advisor failed to process logic", 
-        details: error.message || error 
+      console.error("Advisor engine error:", error.message);
+      res.status(500).json({
+        error: "Advisor failed to process request",
+        details: error.message,
       });
     }
   });
 
-  // Vite static assets serving & integration layer
-  if (process.env.NODE_ENV !== "production") {
+  // ─── Vite Dev Middleware / Static Production Serving ────────────────────────
+  if (process.env.NODE_ENV !== "production" && process.env.ENABLE_VITE_MIDDLEWARE === "true") {
     const vite = await createViteServer({
       server: { middlewareMode: true },
       appType: "spa",
     });
-    // Mount Vite's dev server middleware
     app.use(vite.middlewares);
   } else {
-    // Production serving from compiled build file tree
-    const distPath = path.join(process.cwd(), 'dist');
+    const distPath = path.join(process.cwd(), "dist");
     app.use(express.static(distPath));
-    app.get('*', (req, res) => {
-      res.sendFile(path.join(distPath, 'index.html'));
+    app.get("*", (_req, res) => {
+      res.sendFile(path.join(distPath, "index.html"));
     });
   }
 
   app.listen(PORT, "0.0.0.0", () => {
-    console.log(`Express custom server running at http://localhost:${PORT}`);
+    console.log(`🚀 Express server running at http://localhost:${PORT}`);
   });
 }
 

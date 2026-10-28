@@ -33,23 +33,29 @@ const moreItems: { id: Section; icon: string; label: string }[] = [
 const menuItems = [...navItems, ...moreItems];
 
 export default function App() {
-  const [authed, setAuthed] = useState(false);
+  return (
+    <AppProvider>
+      <AppWrapper />
+    </AppProvider>
+  );
+}
+
+function AppWrapper() {
+  const { user } = useApp();
   const [section, setSection] = useState<Section>("dashboard");
   const [showMobileMore, setShowMobileMore] = useState(false);
 
-  if (!authed) {
-    return <Onboarding onComplete={() => setAuthed(true)} />;
+  if (!user) {
+    return <Onboarding />;
   }
 
   return (
-    <AppProvider>
-      <AppContent
-        section={section}
-        setSection={setSection}
-        showMobileMore={showMobileMore}
-        setShowMobileMore={setShowMobileMore}
-      />
-    </AppProvider>
+    <AppContent
+      section={section}
+      setSection={setSection}
+      showMobileMore={showMobileMore}
+      setShowMobileMore={setShowMobileMore}
+    />
   );
 }
 
